@@ -10,10 +10,29 @@ class StatisticsManager {
     }
 
     async init() {
+        console.log('Statistics Manager initializing...');
         this.setupEventListeners();
         await this.loadTrackingState();
         this.updateCalendar();
         this.updateFromUrl();
+        
+        // Debug: Log all storage data
+        this.debugStorageData();
+    }
+
+    async debugStorageData() {
+        try {
+            const allData = await chrome.storage.local.get(null);
+            console.log('All storage data:', allData);
+            
+            // Check today's data specifically
+            const today = new Date().toISOString().split('T')[0];
+            const todayKey = `data_${today}`;
+            console.log(`Today's key: ${todayKey}`);
+            console.log(`Today's data:`, allData[todayKey]);
+        } catch (error) {
+            console.error('Error checking storage data:', error);
+        }
     }
 
     setupEventListeners() {
@@ -25,6 +44,8 @@ class StatisticsManager {
         trackingToggle.addEventListener('change', async (e) => {
             const isEnabled = e.target.checked;
             const autoResume = autoResumeCheckbox.checked;
+            
+            console.log(`Tracking toggle changed: ${isEnabled}, auto-resume: ${autoResume}`);
             
             if (isEnabled) {
                 await this.enableTracking();
@@ -55,11 +76,64 @@ class StatisticsManager {
         window.addEventListener('popstate', () => {
             this.updateFromUrl();
         });
+
+        // Add debug button for testing
+        this.addDebugButton();
+    }
+
+    addDebugButton() {
+        const header = document.querySelector('header');
+        const debugBtn = document.createElement('button');
+        debugBtn.textContent = 'Add Test Data';
+        debugBtn.style.marginLeft = '10px';
+        debugBtn.style.padding = '8px 12px';
+        debugBtn.style.background = '#e53e3e';
+        debugBtn.style.color = 'white';
+        debugBtn.style.border = 'none';
+        debugBtn.style.borderRadius = '4px';
+        debugBtn.style.cursor = 'pointer';
+        
+        debugBtn.addEventListener('click', () => {
+            this.addTestData();
+        });
+        
+        header.appendChild(debugBtn);
+    }
+
+    async addTestData() {
+        const today = new Date().toISOString().split('T')[0];
+        const storageKey = `data_${today}`;
+        
+        // Sample browsing data (time in milliseconds)
+        const testData = {
+            'https://github.com/github/docs': 15 * 60 * 1000, // 15 minutes
+            'https://stackoverflow.com/questions': 8 * 60 * 1000, // 8 minutes
+            'https://developer.mozilla.org/en-US/docs': 12 * 60 * 1000, // 12 minutes
+            'https://google.com/search': 5 * 60 * 1000, // 5 minutes
+            'https://youtube.com/watch': 20 * 60 * 1000, // 20 minutes
+            'https://github.com/hubwriter/dash-highlighter': 7 * 60 * 1000, // 7 minutes
+            'https://chrome.google.com/webstore': 3 * 60 * 1000, // 3 minutes
+            'https://twitter.com/home': 6 * 60 * 1000, // 6 minutes
+        };
+        
+        try {
+            await chrome.storage.local.set({ [storageKey]: testData });
+            console.log('Test data added for today:', testData);
+            alert('Test data added! Click today\'s date to see the statistics.');
+            
+            // Refresh the calendar to show today has data
+            this.updateCalendar();
+        } catch (error) {
+            console.error('Error adding test data:', error);
+            alert('Error adding test data. Check the console for details.');
+        }
     }
 
     async loadTrackingState() {
         try {
             const response = await chrome.runtime.sendMessage({ action: 'getTrackingState' });
+            console.log('Tracking state response:', response);
+            
             const trackingToggle = document.getElementById('trackingToggle');
             trackingToggle.checked = response.isTracking;
             this.updateToggleLabel(response.isTracking);
@@ -75,7 +149,8 @@ class StatisticsManager {
 
     async enableTracking() {
         try {
-            await chrome.runtime.sendMessage({ action: 'enableTracking' });
+            const response = await chrome.runtime.sendMessage({ action: 'enableTracking' });
+            console.log('Enable tracking response:', response);
         } catch (error) {
             console.error('Error enabling tracking:', error);
         }
@@ -83,10 +158,11 @@ class StatisticsManager {
 
     async disableTracking(autoResumeMinutes = 0) {
         try {
-            await chrome.runtime.sendMessage({ 
+            const response = await chrome.runtime.sendMessage({ 
                 action: 'disableTracking', 
                 autoResumeMinutes 
             });
+            console.log('Disable tracking response:', response);
         } catch (error) {
             console.error('Error disabling tracking:', error);
         }
@@ -195,6 +271,9 @@ class StatisticsManager {
             const hasData = await this.hasDataForDate(dateStr);
             if (hasData) {
                 dayElement.classList.add('has-data');
+                console.log(`Day ${day} has data`);
+            } else {
+                console.log(`Day ${day} has no data`);
             }
             
             // Mark future days as disabled
@@ -220,7 +299,10 @@ class StatisticsManager {
     async hasDataForDate(dateStr) {
         try {
             const result = await chrome.storage.local.get([`data_${dateStr}`]);
-            return result[`data_${dateStr}`] && Object.keys(result[`data_${dateStr}`]).length > 0;
+            const data = result[`data_${dateStr}`];
+            const hasData = data && Object.keys(data).length > 0;
+            console.log(`Checking data for ${dateStr}:`, data, 'Has data:', hasData);
+            return hasData;
         } catch (error) {
             console.error('Error checking data for date:', error);
             return false;
@@ -228,6 +310,7 @@ class StatisticsManager {
     }
 
     async selectDate(date) {
+        console.log('Selected date:', date);
         this.selectedDate = date;
         this.updateUrl();
         await this.loadDataForDate();
@@ -238,14 +321,19 @@ class StatisticsManager {
         if (!this.selectedDate) return;
         
         const dateStr = this.selectedDate.toISOString().split('T')[0];
+        console.log('Loading data for date:', dateStr);
         
         try {
             const result = await chrome.storage.local.get([`data_${dateStr}`]);
             this.currentData = result[`data_${dateStr}`] || {};
             
+            console.log('Loaded data:', this.currentData);
+            
             if (Object.keys(this.currentData).length === 0) {
+                console.log('No data found for this date');
                 this.showNoDataMessage();
             } else {
+                console.log('Displaying statistics for', Object.keys(this.currentData).length, 'URLs');
                 this.displayStatistics();
             }
         } catch (error) {
