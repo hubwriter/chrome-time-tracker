@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chrome Time Tracker - Statistics</title>
+    <link rel="stylesheet" href="../styles/statistics.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Chrome Time Tracker</h1>
+            <div class="tracking-controls">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="trackingToggle" checked>
+                    <span class="slider"></span>
+                </label>
+                <span class="toggle-label">Tracking Enabled</span>
+            </div>
+        </header>
+        
+        <div class="auto-resume-container" id="autoResumeContainer" style="display: none;">
+            <label>
+                <input type="checkbox" id="autoResumeCheckbox">
+                Automatically re-enable tracking after 30 minutes
+            </label>
+        </div>
+        
+        <div class="calendar-container">
+            <div class="calendar-header">
+                <button id="prevMonth" class="nav-btn">&lt;</button>
+                <h2 id="currentMonth">Loading...</h2>
+                <button id="nextMonth" class="nav-btn">&gt;</button>
+            </div>
+            <div id="calendar" class="calendar-grid"></div>
+        </div>
+        
+        <div class="statistics-container">
+            <div id="noDataMessage" class="no-data" style="display: none;">
+                <p>Select a day from the calendar to view your browsing statistics.</p>
+            </div>
+            
+            <div id="statisticsContent" class="statistics-content" style="display: none;">
+                <h3 id="selectedDate">Statistics for:</h3>
+                
+                <div class="table-container">
+                    <table id="statisticsTable">
+                        <thead>
+                            <tr>
+                                <th>Website</th>
+                                <th>Time Spent</th>
+                            </tr>
+                        </thead>
+                        <tbody id="statisticsTableBody"></tbody>
+                    </table>
+                    
+                    <button id="expandListBtn" style="display: none;">Show All URLs</button>
+                </div>
+                
+                <div id="chartContainer" class="chart-container">
+                    <canvas id="pieChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="../scripts/statistics.js"></script>
+</body>
+</html>

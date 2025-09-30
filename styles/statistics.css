@@ -1,0 +1,285 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f8fafc;
+    color: #2d3748;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+h1 {
+    margin: 0;
+    color: #1a202c;
+    font-size: 28px;
+    font-weight: 600;
+}
+
+.tracking-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #cbd5e0;
+    transition: 0.4s;
+    border-radius: 34px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: 0.4s;
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: #48bb78;
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+.toggle-label {
+    font-weight: 500;
+    color: #4a5568;
+}
+
+.auto-resume-container {
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.auto-resume-container label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+    color: #856404;
+}
+
+.calendar-container {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    margin-bottom: 30px;
+}
+
+.calendar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.nav-btn {
+    background: #667eea;
+    color: white;
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    transition: background-color 0.2s;
+}
+
+.nav-btn:hover {
+    background: #5a67d8;
+}
+
+.nav-btn:disabled {
+    background: #cbd5e0;
+    cursor: not-allowed;
+}
+
+#currentMonth {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    background-color: #e2e8f0;
+    border-radius: 8px;
+    padding: 2px;
+}
+
+.calendar-day {
+    background: white;
+    border: none;
+    padding: 15px 5px;
+    text-align: center;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.calendar-day:hover:not(.disabled):not(.future) {
+    background: #edf2f7;
+}
+
+.calendar-day.disabled {
+    color: #a0aec0;
+    cursor: not-allowed;
+    background: #f7fafc;
+}
+
+.calendar-day.future {
+    color: #a0aec0;
+    cursor: not-allowed;
+    background: #f7fafc;
+}
+
+.calendar-day.has-data {
+    background: #e6fffa;
+    color: #065f46;
+    font-weight: 600;
+}
+
+.calendar-day.selected {
+    background: #667eea;
+    color: white;
+    font-weight: 600;
+}
+
+.calendar-header-row {
+    display: contents;
+}
+
+.calendar-header-cell {
+    background: #4a5568;
+    color: white;
+    padding: 10px 5px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.statistics-container {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.no-data {
+    text-align: center;
+    color: #718096;
+    font-style: italic;
+    padding: 40px;
+}
+
+.statistics-content h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: #1a202c;
+}
+
+.table-container {
+    margin-bottom: 30px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 15px;
+}
+
+th, td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+th {
+    background-color: #f7fafc;
+    font-weight: 600;
+    color: #4a5568;
+}
+
+td:first-child {
+    max-width: 400px;
+    word-break: break-all;
+}
+
+td:last-child {
+    text-align: right;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+#expandListBtn {
+    background: #667eea;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+#expandListBtn:hover {
+    background: #5a67d8;
+}
+
+.chart-container {
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+#pieChart {
+    max-height: 400px;
+}
