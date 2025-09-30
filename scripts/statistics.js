@@ -6,30 +6,59 @@ class StatisticsManager {
         this.showingAllUrls = false;
         this.pieChart = null;
         
-        console.log('StatisticsManager: Initializing...');
+        console.log('📊 StatisticsManager: Initializing...');
         this.init();
     }
 
     async init() {
         try {
-            console.log('StatisticsManager: Setting up event listeners...');
+            console.log('📊 StatisticsManager: Setting up event listeners...');
             this.setupEventListeners();
             
-            console.log('StatisticsManager: Loading tracking state...');
+            console.log('📊 StatisticsManager: Loading tracking state...');
             await this.loadTrackingState();
             
-            console.log('StatisticsManager: Updating calendar...');
-            this.updateCalendar();
+            console.log('📊 StatisticsManager: Updating calendar...');
+            await this.updateCalendar();
             
-            console.log('StatisticsManager: Updating from URL...');
-            this.updateFromUrl();
+            console.log('📊 StatisticsManager: Auto-selecting today...');
+            await this.autoSelectToday();
             
-            console.log('StatisticsManager: Debugging storage data...');
+            console.log('📊 StatisticsManager: Debugging storage data...');
             await this.debugStorageData();
             
-            console.log('StatisticsManager: Initialization complete');
+            console.log('✅ StatisticsManager: Initialization complete');
         } catch (error) {
-            console.error('StatisticsManager: Initialization error:', error);
+            console.error('❌ StatisticsManager: Initialization error:', error);
+        }
+    }
+
+    // Fix: Better date handling to avoid timezone issues
+    getLocalDateString(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    // Fix: Create date from calendar day without timezone issues
+    createDateFromCalendarDay(year, month, day) {
+        // Create date at noon local time to avoid timezone issues
+        return new Date(year, month, day, 12, 0, 0);
+    }
+
+    async autoSelectToday() {
+        // Auto-select today unless URL has a specific date
+        const urlParams = new URLSearchParams(window.location.search);
+        const dateParam = urlParams.get('date');
+        
+        if (!dateParam) {
+            console.log('📅 Auto-selecting today');
+            const today = new Date();
+            await this.selectDate(today);
+        } else {
+            console.log('📅 URL has date parameter, using that instead');
+            this.updateFromUrl();
         }
     }
 
@@ -38,11 +67,17 @@ class StatisticsManager {
             const allData = await chrome.storage.local.get(null);
             console.log('📊 All storage data:', allData);
             
-            // Check today's data specifically
-            const today = new Date().toISOString().split('T')[0];
-            const todayKey = `data_${today}`;
+            // Check today's data specifically using fixed date string
+            const today = new Date();
+            const todayStr = this.getLocalDateString(today);
+            const todayKey = `data_${todayStr}`;
             console.log(`📅 Today's key: ${todayKey}`);
             console.log(`📈 Today's data:`, allData[todayKey]);
+            
+            if (allData[todayKey]) {
+                const entries = Object.entries(allData[todayKey]);
+                console.log(`📊 Today has ${entries.length} URLs:`, entries);
+            }
             
             // List all data keys
             const dataKeys = Object.keys(allData).filter(key => key.startsWith('data_'));
@@ -133,8 +168,9 @@ class StatisticsManager {
         try {
             console.log('🧪 Adding test data...');
             
-            const today = new Date().toISOString().split('T')[0];
-            const storageKey = `data_${today}`;
+            const today = new Date();
+            const todayStr = this.getLocalDateString(today);
+            const storageKey = `data_${todayStr}`;
             
             // Sample browsing data (time in milliseconds)
             const testData = {
@@ -148,7 +184,7 @@ class StatisticsManager {
                 'https://twitter.com/home': 6 * 60 * 1000, // 6 minutes
             };
             
-            console.log('💾 Saving test data:', { [storageKey]: testData });
+            console.log('💾 Saving test data with key:', storageKey, testData);
             
             await chrome.storage.local.set({ [storageKey]: testData });
             
@@ -158,12 +194,12 @@ class StatisticsManager {
             const verification = await chrome.storage.local.get([storageKey]);
             console.log('🔍 Verification - saved data:', verification);
             
-            alert('✅ Test data added successfully! Click today\'s date to see the statistics.');
+            alert('✅ Test data added successfully! Refreshing display...');
             
-            // Refresh the calendar to show today has data
+            // Refresh the calendar and data display
             await this.updateCalendar();
             
-            // Auto-select today's date
+            // Auto-select today's date to show the new data
             const today_date = new Date();
             await this.selectDate(today_date);
             
@@ -181,8 +217,8 @@ class StatisticsManager {
             
             const trackingToggle = document.getElementById('trackingToggle');
             if (trackingToggle && response) {
-                trackingToggle.checked = response.isTracking;
-                this.updateToggleLabel(response.isTracking);
+                trackingToggle.checked = response.isTracking !== false;
+                this.updateToggleLabel(response.isTracking !== false);
             }
         } catch (error) {
             console.error('❌ Error loading tracking state:', error);
@@ -230,7 +266,7 @@ class StatisticsManager {
             return;
         }
         
-        // Don't allow navigation to future months
+        // Don't allow navigation to future months (but allow current month)
         const now = new Date();
         if (newDate.getFullYear() > now.getFullYear() || 
             (newDate.getFullYear() === now.getFullYear() && newDate.getMonth() > now.getMonth())) {
@@ -244,7 +280,7 @@ class StatisticsManager {
         this.showNoDataMessage();
     }
 
-    updateCalendar() {
+    async updateCalendar() {
         console.log('📅 Updating calendar...');
         
         const monthElement = document.getElementById('currentMonth');
@@ -266,7 +302,7 @@ class StatisticsManager {
         this.updateNavigationButtons();
         
         // Generate calendar
-        this.generateCalendarGrid(calendarElement);
+        await this.generateCalendarGrid(calendarElement);
     }
 
     updateNavigationButtons() {
@@ -309,6 +345,7 @@ class StatisticsManager {
         const firstDay = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth(), 1);
         const lastDay = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth() + 1, 0);
         const today = new Date();
+        const todayStr = this.getLocalDateString(today);
         
         // Add empty cells for days before the first day of the month
         for (let i = 0; i < firstDay.getDay(); i++) {
@@ -323,25 +360,33 @@ class StatisticsManager {
             dayElement.className = 'calendar-day';
             dayElement.textContent = day;
             
-            const cellDate = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth(), day);
-            const dateStr = cellDate.toISOString().split('T')[0];
+            // Fix: Create date properly without timezone issues
+            const cellDate = this.createDateFromCalendarDay(
+                this.currentDate.getFullYear(), 
+                this.currentDate.getMonth(), 
+                day
+            );
+            const dateStr = this.getLocalDateString(cellDate);
+            
+            console.log(`📅 Day ${day}: cellDate=${cellDate}, dateStr=${dateStr}`);
             
             // Check if this day has data
             const hasData = await this.hasDataForDate(dateStr);
             if (hasData) {
                 dayElement.classList.add('has-data');
-                console.log(`📊 Day ${day} has data`);
-            } else {
-                console.log(`📊 Day ${day} has no data`);
+                console.log(`📊 Day ${day} (${dateStr}) has data`);
             }
             
-            // Mark future days as disabled
-            if (cellDate > today) {
+            // Check if this is today
+            const isToday = dateStr === todayStr;
+            
+            // Mark future days as disabled (but not today)
+            if (cellDate > today && !isToday) {
                 dayElement.classList.add('future');
                 dayElement.disabled = true;
             } else {
                 dayElement.addEventListener('click', () => {
-                    console.log(`🎯 Clicked on day ${day}`);
+                    console.log(`🎯 Clicked on day ${day} (${dateStr})`);
                     this.selectDate(cellDate);
                 });
             }
@@ -350,10 +395,13 @@ class StatisticsManager {
             if (this.selectedDate && 
                 cellDate.toDateString() === this.selectedDate.toDateString()) {
                 dayElement.classList.add('selected');
+                console.log(`✅ Day ${day} is selected`);
             }
             
             container.appendChild(dayElement);
         }
+        
+        console.log('📅 Calendar grid generated');
     }
 
     async hasDataForDate(dateStr) {
@@ -361,7 +409,6 @@ class StatisticsManager {
             const result = await chrome.storage.local.get([`data_${dateStr}`]);
             const data = result[`data_${dateStr}`];
             const hasData = data && Object.keys(data).length > 0;
-            console.log(`🔍 Checking data for ${dateStr}:`, data, 'Has data:', hasData);
             return hasData;
         } catch (error) {
             console.error('❌ Error checking data for date:', error);
@@ -370,24 +417,32 @@ class StatisticsManager {
     }
 
     async selectDate(date) {
-        console.log('🎯 Selected date:', date);
+        console.log('🎯 Selecting date:', date);
+        const dateStr = this.getLocalDateString(date);
+        console.log('🎯 Date string for storage:', dateStr);
+        
         this.selectedDate = date;
         this.updateUrl();
         await this.loadDataForDate();
-        this.updateCalendar(); // Refresh to show selection
+        await this.updateCalendar(); // Refresh to show selection
     }
 
     async loadDataForDate() {
-        if (!this.selectedDate) return;
+        if (!this.selectedDate) {
+            console.log('⚠️ No date selected');
+            this.showNoDataMessage();
+            return;
+        }
         
-        const dateStr = this.selectedDate.toISOString().split('T')[0];
+        const dateStr = this.getLocalDateString(this.selectedDate);
         console.log('📥 Loading data for date:', dateStr);
         
         try {
             const result = await chrome.storage.local.get([`data_${dateStr}`]);
             this.currentData = result[`data_${dateStr}`] || {};
             
-            console.log('📊 Loaded data:', this.currentData);
+            console.log('📊 Loaded data for', dateStr, ':', this.currentData);
+            console.log('📊 Number of URLs:', Object.keys(this.currentData).length);
             
             if (Object.keys(this.currentData).length === 0) {
                 console.log('🚫 No data found for this date');
@@ -406,18 +461,33 @@ class StatisticsManager {
         const noDataMessage = document.getElementById('noDataMessage');
         const statisticsContent = document.getElementById('statisticsContent');
         
-        if (noDataMessage) noDataMessage.style.display = 'block';
-        if (statisticsContent) statisticsContent.style.display = 'none';
+        if (noDataMessage) {
+            noDataMessage.style.display = 'block';
+            // Update the message to be more specific
+            noDataMessage.innerHTML = '<p>No viewing data available for this date.</p>';
+        }
+        if (statisticsContent) {
+            statisticsContent.style.display = 'none';
+        }
         
         console.log('💭 Showing no data message');
     }
 
     displayStatistics() {
+        console.log('📊 DisplayStatistics called with data:', this.currentData);
+        console.log('📊 Data entries:', Object.entries(this.currentData));
+        
         const noDataMessage = document.getElementById('noDataMessage');
         const statisticsContent = document.getElementById('statisticsContent');
         
-        if (noDataMessage) noDataMessage.style.display = 'none';
-        if (statisticsContent) statisticsContent.style.display = 'block';
+        if (noDataMessage) {
+            noDataMessage.style.display = 'none';
+            console.log('✅ Hiding no data message');
+        }
+        if (statisticsContent) {
+            statisticsContent.style.display = 'block';
+            console.log('✅ Showing statistics content');
+        }
         
         // Update selected date display
         const selectedDateElement = document.getElementById('selectedDate');
@@ -428,6 +498,7 @@ class StatisticsManager {
                 month: 'long',
                 day: 'numeric'
             })}`;
+            console.log('✅ Updated selected date display');
         }
         
         this.showingAllUrls = false;
@@ -446,16 +517,23 @@ class StatisticsManager {
             return;
         }
         
+        console.log('📊 Updating table with current data:', this.currentData);
+        
+        // Clear existing content
+        tbody.innerHTML = '';
+        
         // Sort URLs by time spent (descending)
         const sortedEntries = Object.entries(this.currentData)
             .sort(([,a], [,b]) => b - a);
         
-        tbody.innerHTML = '';
+        console.log('📊 Sorted entries:', sortedEntries);
         
         // Determine how many entries to show
         const entriesToShow = this.showingAllUrls ? sortedEntries : sortedEntries.slice(0, 20);
         
-        entriesToShow.forEach(([url, timeMs]) => {
+        console.log(`📊 Showing ${entriesToShow.length} entries out of ${sortedEntries.length} total`);
+        
+        entriesToShow.forEach(([url, timeMs], index) => {
             const row = document.createElement('tr');
             
             const urlCell = document.createElement('td');
@@ -463,10 +541,12 @@ class StatisticsManager {
             row.appendChild(urlCell);
             
             const timeCell = document.createElement('td');
-            timeCell.textContent = this.formatTime(timeMs);
+            const formattedTime = this.formatTime(timeMs);
+            timeCell.textContent = formattedTime;
             row.appendChild(timeCell);
             
             tbody.appendChild(row);
+            console.log(`📊 Added row ${index + 1}: ${url} - ${formattedTime} (${timeMs}ms)`);
         });
         
         // Show/hide expand button
@@ -479,7 +559,7 @@ class StatisticsManager {
             }
         }
         
-        console.log(`📊 Table updated with ${entriesToShow.length} entries`);
+        console.log(`✅ Table updated successfully with ${entriesToShow.length} entries`);
     }
 
     toggleUrlList() {
@@ -514,6 +594,11 @@ class StatisticsManager {
         const sortedEntries = Object.entries(this.currentData)
             .sort(([,a], [,b]) => b - a)
             .slice(0, 20);
+        
+        if (sortedEntries.length === 0) {
+            console.log('📊 No data for chart');
+            return;
+        }
         
         const labels = sortedEntries.map(([url]) => this.shortenUrl(url));
         const data = sortedEntries.map(([,timeMs]) => timeMs);
@@ -607,8 +692,9 @@ class StatisticsManager {
     updateUrl() {
         const url = new URL(window.location);
         if (this.selectedDate) {
-            const dateStr = this.selectedDate.toISOString().split('T')[0];
+            const dateStr = this.getLocalDateString(this.selectedDate);
             url.searchParams.set('date', dateStr);
+            console.log('🔗 Updating URL with date:', dateStr);
         } else {
             url.searchParams.delete('date');
         }
@@ -620,7 +706,11 @@ class StatisticsManager {
         const dateParam = urlParams.get('date');
         
         if (dateParam) {
-            const date = new Date(dateParam + 'T00:00:00');
+            console.log('📅 Loading date from URL:', dateParam);
+            // Parse date string directly (YYYY-MM-DD format)
+            const [year, month, day] = dateParam.split('-').map(Number);
+            const date = this.createDateFromCalendarDay(year, month - 1, day); // month is 0-indexed
+            
             if (!isNaN(date.getTime())) {
                 this.selectedDate = date;
                 this.currentDate = new Date(date.getFullYear(), date.getMonth(), 1);
@@ -630,12 +720,20 @@ class StatisticsManager {
             }
         }
         
-        this.showNoDataMessage();
+        // If no valid date in URL, auto-select today
+        console.log('📅 No valid date in URL, will auto-select today');
     }
 }
 
-// Initialize the statistics manager when the page loads
+// Initialize and expose the statistics manager globally
+let statsManager;
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 DOM loaded, initializing StatisticsManager...');
-    new StatisticsManager();
+    statsManager = new StatisticsManager();
+    
+    // Expose globally for debugging
+    window.statsManager = statsManager;
+    
+    console.log('✅ StatisticsManager exposed globally as window.statsManager');
 });
