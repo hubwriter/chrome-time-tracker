@@ -6,32 +6,52 @@ class StatisticsManager {
         this.showingAllUrls = false;
         this.pieChart = null;
         
+        console.log('StatisticsManager: Initializing...');
         this.init();
     }
 
     async init() {
-        console.log('Statistics Manager initializing...');
-        this.setupEventListeners();
-        await this.loadTrackingState();
-        this.updateCalendar();
-        this.updateFromUrl();
-        
-        // Debug: Log all storage data
-        this.debugStorageData();
+        try {
+            console.log('StatisticsManager: Setting up event listeners...');
+            this.setupEventListeners();
+            
+            console.log('StatisticsManager: Loading tracking state...');
+            await this.loadTrackingState();
+            
+            console.log('StatisticsManager: Updating calendar...');
+            this.updateCalendar();
+            
+            console.log('StatisticsManager: Updating from URL...');
+            this.updateFromUrl();
+            
+            console.log('StatisticsManager: Debugging storage data...');
+            await this.debugStorageData();
+            
+            console.log('StatisticsManager: Initialization complete');
+        } catch (error) {
+            console.error('StatisticsManager: Initialization error:', error);
+        }
     }
 
     async debugStorageData() {
         try {
             const allData = await chrome.storage.local.get(null);
-            console.log('All storage data:', allData);
+            console.log('📊 All storage data:', allData);
             
             // Check today's data specifically
             const today = new Date().toISOString().split('T')[0];
             const todayKey = `data_${today}`;
-            console.log(`Today's key: ${todayKey}`);
-            console.log(`Today's data:`, allData[todayKey]);
+            console.log(`📅 Today's key: ${todayKey}`);
+            console.log(`📈 Today's data:`, allData[todayKey]);
+            
+            // List all data keys
+            const dataKeys = Object.keys(allData).filter(key => key.startsWith('data_'));
+            console.log('🗂️ Available data keys:', dataKeys);
+            
+            return allData;
         } catch (error) {
-            console.error('Error checking storage data:', error);
+            console.error('❌ Error checking storage data:', error);
+            return {};
         }
     }
 
@@ -41,41 +61,40 @@ class StatisticsManager {
         const autoResumeCheckbox = document.getElementById('autoResumeCheckbox');
         const autoResumeContainer = document.getElementById('autoResumeContainer');
         
-        trackingToggle.addEventListener('change', async (e) => {
-            const isEnabled = e.target.checked;
-            const autoResume = autoResumeCheckbox.checked;
-            
-            console.log(`Tracking toggle changed: ${isEnabled}, auto-resume: ${autoResume}`);
-            
-            if (isEnabled) {
-                await this.enableTracking();
-                autoResumeContainer.style.display = 'none';
-            } else {
-                await this.disableTracking(autoResume ? 30 : 0);
-                autoResumeContainer.style.display = autoResume ? 'none' : 'block';
-            }
-            
-            this.updateToggleLabel(isEnabled);
-        });
+        if (trackingToggle) {
+            trackingToggle.addEventListener('change', async (e) => {
+                const isEnabled = e.target.checked;
+                const autoResume = autoResumeCheckbox?.checked || false;
+                
+                console.log(`🔄 Tracking toggle changed: ${isEnabled}, auto-resume: ${autoResume}`);
+                
+                if (isEnabled) {
+                    await this.enableTracking();
+                    if (autoResumeContainer) autoResumeContainer.style.display = 'none';
+                } else {
+                    await this.disableTracking(autoResume ? 30 : 0);
+                    if (autoResumeContainer) autoResumeContainer.style.display = autoResume ? 'none' : 'block';
+                }
+                
+                this.updateToggleLabel(isEnabled);
+            });
+        }
 
         // Calendar navigation
-        document.getElementById('prevMonth').addEventListener('click', () => {
-            this.changeMonth(-1);
-        });
+        const prevBtn = document.getElementById('prevMonth');
+        const nextBtn = document.getElementById('nextMonth');
         
-        document.getElementById('nextMonth').addEventListener('click', () => {
-            this.changeMonth(1);
-        });
+        if (prevBtn) prevBtn.addEventListener('click', () => this.changeMonth(-1));
+        if (nextBtn) nextBtn.addEventListener('click', () => this.changeMonth(1));
 
         // Expand list button
-        document.getElementById('expandListBtn').addEventListener('click', () => {
-            this.toggleUrlList();
-        });
+        const expandBtn = document.getElementById('expandListBtn');
+        if (expandBtn) {
+            expandBtn.addEventListener('click', () => this.toggleUrlList());
+        }
 
         // Handle URL parameter changes
-        window.addEventListener('popstate', () => {
-            this.updateFromUrl();
-        });
+        window.addEventListener('popstate', () => this.updateFromUrl());
 
         // Add debug button for testing
         this.addDebugButton();
@@ -83,76 +102,106 @@ class StatisticsManager {
 
     addDebugButton() {
         const header = document.querySelector('header');
+        if (!header) {
+            console.error('❌ Header element not found');
+            return;
+        }
+        
         const debugBtn = document.createElement('button');
         debugBtn.textContent = 'Add Test Data';
-        debugBtn.style.marginLeft = '10px';
-        debugBtn.style.padding = '8px 12px';
-        debugBtn.style.background = '#e53e3e';
-        debugBtn.style.color = 'white';
-        debugBtn.style.border = 'none';
-        debugBtn.style.borderRadius = '4px';
-        debugBtn.style.cursor = 'pointer';
+        debugBtn.style.cssText = `
+            margin-left: 10px;
+            padding: 8px 12px;
+            background: #e53e3e;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        `;
         
-        debugBtn.addEventListener('click', () => {
-            this.addTestData();
+        debugBtn.addEventListener('click', async () => {
+            console.log('🧪 Debug button clicked');
+            await this.addTestData();
         });
         
         header.appendChild(debugBtn);
+        console.log('🔧 Debug button added');
     }
 
     async addTestData() {
-        const today = new Date().toISOString().split('T')[0];
-        const storageKey = `data_${today}`;
-        
-        // Sample browsing data (time in milliseconds)
-        const testData = {
-            'https://github.com/github/docs': 15 * 60 * 1000, // 15 minutes
-            'https://stackoverflow.com/questions': 8 * 60 * 1000, // 8 minutes
-            'https://developer.mozilla.org/en-US/docs': 12 * 60 * 1000, // 12 minutes
-            'https://google.com/search': 5 * 60 * 1000, // 5 minutes
-            'https://youtube.com/watch': 20 * 60 * 1000, // 20 minutes
-            'https://github.com/hubwriter/dash-highlighter': 7 * 60 * 1000, // 7 minutes
-            'https://chrome.google.com/webstore': 3 * 60 * 1000, // 3 minutes
-            'https://twitter.com/home': 6 * 60 * 1000, // 6 minutes
-        };
-        
         try {
+            console.log('🧪 Adding test data...');
+            
+            const today = new Date().toISOString().split('T')[0];
+            const storageKey = `data_${today}`;
+            
+            // Sample browsing data (time in milliseconds)
+            const testData = {
+                'https://github.com/github/docs': 15 * 60 * 1000, // 15 minutes
+                'https://stackoverflow.com/questions': 8 * 60 * 1000, // 8 minutes
+                'https://developer.mozilla.org/en-US/docs': 12 * 60 * 1000, // 12 minutes
+                'https://google.com/search': 5 * 60 * 1000, // 5 minutes
+                'https://youtube.com/watch': 20 * 60 * 1000, // 20 minutes
+                'https://github.com/hubwriter/dash-highlighter': 7 * 60 * 1000, // 7 minutes
+                'https://chrome.google.com/webstore': 3 * 60 * 1000, // 3 minutes
+                'https://twitter.com/home': 6 * 60 * 1000, // 6 minutes
+            };
+            
+            console.log('💾 Saving test data:', { [storageKey]: testData });
+            
             await chrome.storage.local.set({ [storageKey]: testData });
-            console.log('Test data added for today:', testData);
-            alert('Test data added! Click today\'s date to see the statistics.');
+            
+            console.log('✅ Test data saved successfully');
+            
+            // Verify the data was saved
+            const verification = await chrome.storage.local.get([storageKey]);
+            console.log('🔍 Verification - saved data:', verification);
+            
+            alert('✅ Test data added successfully! Click today\'s date to see the statistics.');
             
             // Refresh the calendar to show today has data
-            this.updateCalendar();
+            await this.updateCalendar();
+            
+            // Auto-select today's date
+            const today_date = new Date();
+            await this.selectDate(today_date);
+            
         } catch (error) {
-            console.error('Error adding test data:', error);
-            alert('Error adding test data. Check the console for details.');
+            console.error('❌ Error adding test data:', error);
+            alert('❌ Error adding test data. Check the console for details.');
         }
     }
 
     async loadTrackingState() {
         try {
+            console.log('📡 Sending message to background script...');
             const response = await chrome.runtime.sendMessage({ action: 'getTrackingState' });
-            console.log('Tracking state response:', response);
+            console.log('📡 Tracking state response:', response);
             
             const trackingToggle = document.getElementById('trackingToggle');
-            trackingToggle.checked = response.isTracking;
-            this.updateToggleLabel(response.isTracking);
+            if (trackingToggle && response) {
+                trackingToggle.checked = response.isTracking;
+                this.updateToggleLabel(response.isTracking);
+            }
         } catch (error) {
-            console.error('Error loading tracking state:', error);
+            console.error('❌ Error loading tracking state:', error);
         }
     }
 
     updateToggleLabel(isEnabled) {
         const label = document.querySelector('.toggle-label');
-        label.textContent = isEnabled ? 'Tracking Enabled' : 'Tracking Disabled';
+        if (label) {
+            label.textContent = isEnabled ? 'Tracking Enabled' : 'Tracking Disabled';
+        }
     }
 
     async enableTracking() {
         try {
             const response = await chrome.runtime.sendMessage({ action: 'enableTracking' });
-            console.log('Enable tracking response:', response);
+            console.log('✅ Enable tracking response:', response);
         } catch (error) {
-            console.error('Error enabling tracking:', error);
+            console.error('❌ Error enabling tracking:', error);
         }
     }
 
@@ -162,9 +211,9 @@ class StatisticsManager {
                 action: 'disableTracking', 
                 autoResumeMinutes 
             });
-            console.log('Disable tracking response:', response);
+            console.log('⏸️ Disable tracking response:', response);
         } catch (error) {
-            console.error('Error disabling tracking:', error);
+            console.error('❌ Error disabling tracking:', error);
         }
     }
 
@@ -196,8 +245,15 @@ class StatisticsManager {
     }
 
     updateCalendar() {
+        console.log('📅 Updating calendar...');
+        
         const monthElement = document.getElementById('currentMonth');
         const calendarElement = document.getElementById('calendar');
+        
+        if (!monthElement || !calendarElement) {
+            console.error('❌ Calendar elements not found');
+            return;
+        }
         
         // Update month display
         const monthName = this.currentDate.toLocaleDateString('en-US', { 
@@ -217,6 +273,8 @@ class StatisticsManager {
         const prevBtn = document.getElementById('prevMonth');
         const nextBtn = document.getElementById('nextMonth');
         
+        if (!prevBtn || !nextBtn) return;
+        
         // Check if we can go back (2 months max)
         const twoMonthsAgo = new Date();
         twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
@@ -235,6 +293,7 @@ class StatisticsManager {
     }
 
     async generateCalendarGrid(container) {
+        console.log('📅 Generating calendar grid...');
         container.innerHTML = '';
         
         // Add day headers
@@ -271,9 +330,9 @@ class StatisticsManager {
             const hasData = await this.hasDataForDate(dateStr);
             if (hasData) {
                 dayElement.classList.add('has-data');
-                console.log(`Day ${day} has data`);
+                console.log(`📊 Day ${day} has data`);
             } else {
-                console.log(`Day ${day} has no data`);
+                console.log(`📊 Day ${day} has no data`);
             }
             
             // Mark future days as disabled
@@ -282,6 +341,7 @@ class StatisticsManager {
                 dayElement.disabled = true;
             } else {
                 dayElement.addEventListener('click', () => {
+                    console.log(`🎯 Clicked on day ${day}`);
                     this.selectDate(cellDate);
                 });
             }
@@ -301,16 +361,16 @@ class StatisticsManager {
             const result = await chrome.storage.local.get([`data_${dateStr}`]);
             const data = result[`data_${dateStr}`];
             const hasData = data && Object.keys(data).length > 0;
-            console.log(`Checking data for ${dateStr}:`, data, 'Has data:', hasData);
+            console.log(`🔍 Checking data for ${dateStr}:`, data, 'Has data:', hasData);
             return hasData;
         } catch (error) {
-            console.error('Error checking data for date:', error);
+            console.error('❌ Error checking data for date:', error);
             return false;
         }
     }
 
     async selectDate(date) {
-        console.log('Selected date:', date);
+        console.log('🎯 Selected date:', date);
         this.selectedDate = date;
         this.updateUrl();
         await this.loadDataForDate();
@@ -321,53 +381,70 @@ class StatisticsManager {
         if (!this.selectedDate) return;
         
         const dateStr = this.selectedDate.toISOString().split('T')[0];
-        console.log('Loading data for date:', dateStr);
+        console.log('📥 Loading data for date:', dateStr);
         
         try {
             const result = await chrome.storage.local.get([`data_${dateStr}`]);
             this.currentData = result[`data_${dateStr}`] || {};
             
-            console.log('Loaded data:', this.currentData);
+            console.log('📊 Loaded data:', this.currentData);
             
             if (Object.keys(this.currentData).length === 0) {
-                console.log('No data found for this date');
+                console.log('🚫 No data found for this date');
                 this.showNoDataMessage();
             } else {
-                console.log('Displaying statistics for', Object.keys(this.currentData).length, 'URLs');
+                console.log('✅ Displaying statistics for', Object.keys(this.currentData).length, 'URLs');
                 this.displayStatistics();
             }
         } catch (error) {
-            console.error('Error loading data for date:', error);
+            console.error('❌ Error loading data for date:', error);
             this.showNoDataMessage();
         }
     }
 
     showNoDataMessage() {
-        document.getElementById('noDataMessage').style.display = 'block';
-        document.getElementById('statisticsContent').style.display = 'none';
+        const noDataMessage = document.getElementById('noDataMessage');
+        const statisticsContent = document.getElementById('statisticsContent');
+        
+        if (noDataMessage) noDataMessage.style.display = 'block';
+        if (statisticsContent) statisticsContent.style.display = 'none';
+        
+        console.log('💭 Showing no data message');
     }
 
     displayStatistics() {
-        document.getElementById('noDataMessage').style.display = 'none';
-        document.getElementById('statisticsContent').style.display = 'block';
+        const noDataMessage = document.getElementById('noDataMessage');
+        const statisticsContent = document.getElementById('statisticsContent');
+        
+        if (noDataMessage) noDataMessage.style.display = 'none';
+        if (statisticsContent) statisticsContent.style.display = 'block';
         
         // Update selected date display
         const selectedDateElement = document.getElementById('selectedDate');
-        selectedDateElement.textContent = `Statistics for ${this.selectedDate.toLocaleDateString('en-US', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        })}`;
+        if (selectedDateElement) {
+            selectedDateElement.textContent = `Statistics for ${this.selectedDate.toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            })}`;
+        }
         
         this.showingAllUrls = false;
         this.updateTable();
         this.updateChart();
+        
+        console.log('📊 Statistics displayed successfully');
     }
 
     updateTable() {
         const tbody = document.getElementById('statisticsTableBody');
         const expandBtn = document.getElementById('expandListBtn');
+        
+        if (!tbody) {
+            console.error('❌ Table body not found');
+            return;
+        }
         
         // Sort URLs by time spent (descending)
         const sortedEntries = Object.entries(this.currentData)
@@ -393,12 +470,16 @@ class StatisticsManager {
         });
         
         // Show/hide expand button
-        if (sortedEntries.length > 20) {
-            expandBtn.style.display = 'block';
-            expandBtn.textContent = this.showingAllUrls ? 'Show Top 20' : 'Show All URLs';
-        } else {
-            expandBtn.style.display = 'none';
+        if (expandBtn) {
+            if (sortedEntries.length > 20) {
+                expandBtn.style.display = 'block';
+                expandBtn.textContent = this.showingAllUrls ? 'Show Top 20' : 'Show All URLs';
+            } else {
+                expandBtn.style.display = 'none';
+            }
         }
+        
+        console.log(`📊 Table updated with ${entriesToShow.length} entries`);
     }
 
     toggleUrlList() {
@@ -408,8 +489,13 @@ class StatisticsManager {
     }
 
     updateChart() {
-        const ctx = document.getElementById('pieChart').getContext('2d');
+        const canvas = document.getElementById('pieChart');
         const chartContainer = document.getElementById('chartContainer');
+        
+        if (!canvas || !chartContainer) {
+            console.log('📊 Chart elements not found, skipping chart update');
+            return;
+        }
         
         // Hide chart if showing all URLs
         if (this.showingAllUrls) {
@@ -420,7 +506,7 @@ class StatisticsManager {
         }
         
         // Destroy existing chart
-        if (this.pieChart) {
+        if (this.pieChart && this.pieChart.destroy) {
             this.pieChart.destroy();
         }
         
@@ -433,40 +519,48 @@ class StatisticsManager {
         const data = sortedEntries.map(([,timeMs]) => timeMs);
         const colors = this.generateColors(sortedEntries.length);
         
-        this.pieChart = new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: labels,
-                datasets: [{
-                    data: data,
-                    backgroundColor: colors,
-                    borderWidth: 2,
-                    borderColor: '#ffffff'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: {
-                            usePointStyle: true,
-                            padding: 15
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: (context) => {
-                                const label = context.label || '';
-                                const value = this.formatTime(context.raw);
-                                return `${label}: ${value}`;
+        // Check if Chart.js is available
+        if (typeof Chart !== 'undefined') {
+            const ctx = canvas.getContext('2d');
+            this.pieChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: colors,
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 15
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const label = context.label || '';
+                                    const value = this.formatTime(context.raw);
+                                    return `${label}: ${value}`;
+                                }
                             }
                         }
                     }
                 }
-            }
-        });
+            });
+            
+            console.log('📊 Chart updated successfully');
+        } else {
+            console.warn('⚠️ Chart.js not available, skipping chart');
+        }
     }
 
     shortenUrl(url) {
@@ -479,15 +573,13 @@ class StatisticsManager {
     }
 
     generateColors(count) {
-        // Generate a consistent color for each domain
         const colors = [];
         const hueStep = 360 / count;
         
         for (let i = 0; i < count; i++) {
             const hue = (i * hueStep) % 360;
-            // Vary saturation and lightness to ensure adjacent colors are different
-            const saturation = 60 + (i % 2) * 20; // 60% or 80%
-            const lightness = 50 + (i % 3) * 10;  // 50%, 60%, or 70%
+            const saturation = 60 + (i % 2) * 20;
+            const lightness = 50 + (i % 3) * 10;
             colors.push(`hsl(${hue}, ${saturation}%, ${lightness}%)`);
         }
         
@@ -544,5 +636,6 @@ class StatisticsManager {
 
 // Initialize the statistics manager when the page loads
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 DOM loaded, initializing StatisticsManager...');
     new StatisticsManager();
 });
