@@ -1,82 +1,109 @@
+/* Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    margin: 0;
-    padding: 20px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 20px;
 }
 
 .container {
-    max-width: 600px;
     width: 100%;
+    max-width: 600px;
 }
 
+/* Welcome Card */
 .welcome-card {
     background: white;
-    border-radius: 12px;
+    border-radius: 16px;
     padding: 40px;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
     text-align: center;
 }
 
+/* Icon */
 .icon-container {
-    margin-bottom: 20px;
+    margin-bottom: 24px;
 }
 
 .welcome-icon {
     width: 80px;
     height: 80px;
-    border-radius: 12px;
+    border-radius: 16px;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
 }
 
+/* Typography */
 h1 {
     color: #2d3748;
-    margin-bottom: 20px;
     font-size: 28px;
     font-weight: 600;
+    margin-bottom: 20px;
 }
 
-.description {
-    margin-bottom: 30px;
-}
-
-.description p {
+h3 {
     color: #4a5568;
-    font-size: 16px;
-    line-height: 1.6;
-    margin: 0;
-}
-
-.features, .usage, .info-section {
-    text-align: left;
-    margin-bottom: 25px;
-}
-
-.features h3, .usage h3, .info-section h3 {
-    color: #2d3748;
     font-size: 18px;
-    margin-bottom: 10px;
     font-weight: 600;
+    margin-bottom: 12px;
+}
+
+p {
+    color: #718096;
+    line-height: 1.6;
+    margin-bottom: 16px;
+}
+
+/* Content Sections */
+.description {
+    margin-bottom: 32px;
+}
+
+.features {
+    text-align: left;
+    margin-bottom: 32px;
 }
 
 .features ul {
-    color: #4a5568;
-    padding-left: 20px;
-    margin: 0;
+    list-style: none;
+    padding-left: 0;
 }
 
 .features li {
+    color: #718096;
+    line-height: 1.6;
     margin-bottom: 8px;
-    line-height: 1.5;
+    padding-left: 24px;
+    position: relative;
 }
 
-.usage p, .info-section p {
-    color: #4a5568;
-    line-height: 1.6;
-    margin: 5px 0;
+.features li:before {
+    content: "✓";
+    color: #48bb78;
+    font-weight: bold;
+    position: absolute;
+    left: 0;
+}
+
+.usage {
+    text-align: left;
+    margin-bottom: 32px;
+}
+
+.info-section {
+    text-align: left;
+    margin-bottom: 32px;
+    padding: 20px;
+    background: #f7fafc;
+    border-radius: 8px;
 }
 
 .info-section a {
@@ -88,24 +115,59 @@ h1 {
     text-decoration: underline;
 }
 
+/* Get Started Button */
 .get-started-btn {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     border: none;
-    padding: 12px 30px;
     border-radius: 8px;
     font-size: 16px;
     font-weight: 600;
     cursor: pointer;
-    transition: transform 0.2s, box-shadow 0.2s;
-    margin-top: 20px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    min-width: 160px;
+    min-height: 48px;
 }
 
 .get-started-btn:hover {
     transform: translateY(-2px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
 }
 
-.get-started-btn:active {
-    transform: translateY(0);
+.get-started-btn a {
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    padding: 12px 24px;
+}
+
+.get-started-btn a:hover {
+    text-decoration: none;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .welcome-card {
+        padding: 24px;
+        margin: 16px;
+    }
+
+    h1 {
+        font-size: 24px;
+    }
+
+    .welcome-icon {
+        width: 64px;
+        height: 64px;
+    }
 }
