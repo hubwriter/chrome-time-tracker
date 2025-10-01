@@ -1,14 +1,88 @@
-// Chrome Time Tracker - Background Script
-let currentUrl = '';
-let startTime = 0;
-let isTracking = true;
-let autoResumeTimeoutId = null;
+/**
+ * Chrome Time Tracker - Background Service Worker
+ *
+ * This background script serves as the core engine for the Chrome Time Tracker extension.
+ * It runs continuously in the background and handles:
+ *
+ * 1. Website Time Tracking:
+ *    - Monitors active tab changes and URL navigation
+ *    - Records time spent on each website in Chrome local storage
+ *    - Excludes Chrome internal pages and extension pages
+ *
+ * 2. Tracking State Management:
+ *    - Maintains global tracking enabled/disabled state
+ *    - Handles enable/disable requests from the UI
+ *    - Persists tracking state across browser sessions
+ *
+ * 3. Auto-Resume Timer System:
+ *    - Manages automatic tracking resumption after temporary pauses
+ *    - Coordinates with UI countdown timers
+ *    - Sends notifications when tracking resumes automatically
+ *
+ * 4. Automatic Data Cleanup:
+ *    - Runs periodic cleanup every 6 hours to remove old data
+ *    - Maintains 3 months of data (current month + 2 previous months)
+ *    - Operates transparently without user intervention
+ *
+ * 5. Extension Lifecycle:
+ *    - Handles extension installation and startup
+ *    - Opens welcome page when extension icon is clicked
+ *    - Manages message passing between UI and background contexts
+ *
+ * Data Storage Structure:
+ * - `data_YYYY-MM-DD`: Daily website time data (URL -> milliseconds)
+ * - `isTracking`: Boolean tracking state
+ * - `autoResumeTimer`: Timer state for auto-resume functionality
+ * - `lastAutomaticCleanup`: Metadata about cleanup operations
+ *
+ */
 
-// Data retention constants - keep current month + 2 previous months
-const DATA_RETENTION_MONTHS = 3;
-const CLEANUP_INTERVAL_HOURS = 6; // Run cleanup every 6 hours
+// ==================== CONSTANTS ====================
 
-// Initialize on startup and install
+const CONFIG = {
+    DATA_RETENTION_MONTHS: 3,      // Keep current month + 2 previous months
+    CLEANUP_INTERVAL_HOURS: 6,     // Run cleanup every 6 hours
+    EXCLUDED_URL_PREFIXES: ['chrome://', 'chrome-extension://']
+};
+
+// ==================== STATE MANAGEMENT ====================
+
+class TrackingState {
+    constructor() {
+        this.currentUrl = '';
+        this.startTime = 0;
+        this.isTracking = true;
+        this.autoResumeTimeoutId = null;
+    }
+
+    reset() {
+        this.currentUrl = '';
+        this.startTime = 0;
+    }
+
+    setCurrentSession(url, startTime) {
+        this.currentUrl = url;
+        this.startTime = startTime;
+    }
+
+    getCurrentSession() {
+        return {
+            url: this.currentUrl,
+            startTime: this.startTime,
+            duration: this.startTime > 0 ? Date.now() - this.startTime : 0
+        };
+    }
+
+    isValidUrl(url) {
+        if (!url) return false;
+        return !CONFIG.EXCLUDED_URL_PREFIXES.some(prefix => url.startsWith(prefix));
+    }
+}
+
+const trackingState = new TrackingState();
+
+// ==================== EXTENSION LIFECYCLE ====================
+
 chrome.runtime.onStartup.addListener(() => {
     console.log('🚀 Background: Extension startup');
     initializeExtension();
@@ -19,47 +93,51 @@ chrome.runtime.onInstalled.addListener(() => {
     initializeExtension();
 });
 
-async function initializeExtension() {
-    // Initialize tracking state
-    const result = await chrome.storage.local.get(['isTracking']);
-    isTracking = result.isTracking !== false;
-
-    // Check for existing auto-resume timer
-    checkForExistingTimer();
-
-    // Start automatic cleanup cycle
-    startAutomaticCleanup();
-
-    console.log('✅ Background: Extension initialized');
-}
-
-// Handle extension icon clicks - open welcome page in new tab
-chrome.action.onClicked.addListener((tab) => {
+chrome.action.onClicked.addListener(() => {
     console.log('🎯 Extension icon clicked');
-
-    // Open the welcome page in a new tab
     chrome.tabs.create({
         url: chrome.runtime.getURL('pages/welcome.html')
     });
 });
 
-// Automatic cleanup management
-function startAutomaticCleanup() {
-    console.log('🧹 Background: Starting automatic cleanup cycle');
-
-    // Run cleanup immediately on startup
-    performDataCleanup();
-
-    // Set up periodic cleanup every 6 hours
-    setInterval(() => {
-        console.log('🧹 Background: Running scheduled cleanup');
-        performDataCleanup();
-    }, CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000);
+async function initializeExtension() {
+    try {
+        await loadTrackingState();
+        await restoreAutoResumeTimer();
+        startAutomaticCleanup();
+        console.log('✅ Background: Extension initialized');
+    } catch (error) {
+        console.error('❌ Background: Initialization failed:', error);
+    }
 }
 
-// Tab and URL tracking
+// ==================== TRACKING STATE PERSISTENCE ====================
+
+async function loadTrackingState() {
+    try {
+        const result = await chrome.storage.local.get(['isTracking']);
+        trackingState.isTracking = result.isTracking !== false;
+        console.log('📡 Background: Tracking state loaded:', trackingState.isTracking);
+    } catch (error) {
+        console.error('❌ Background: Error loading tracking state:', error);
+        trackingState.isTracking = true; // Default to enabled
+    }
+}
+
+async function saveTrackingState(isTracking) {
+    try {
+        trackingState.isTracking = isTracking;
+        await chrome.storage.local.set({ isTracking });
+        console.log('💾 Background: Tracking state saved:', isTracking);
+    } catch (error) {
+        console.error('❌ Background: Error saving tracking state:', error);
+    }
+}
+
+// ==================== URL TRACKING ====================
+
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
-    if (!isTracking) return;
+    if (!trackingState.isTracking) return;
 
     try {
         const tab = await chrome.tabs.get(activeInfo.tabId);
@@ -70,7 +148,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (!isTracking) return;
+    if (!trackingState.isTracking) return;
 
     if (changeInfo.status === 'complete' && tab.active && tab.url) {
         handleUrlChange(tab.url);
@@ -78,26 +156,26 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 function handleUrlChange(url) {
-    if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+    if (!trackingState.isValidUrl(url)) {
         return;
     }
 
     const now = Date.now();
 
-    // Save time for previous URL
-    if (currentUrl && startTime > 0) {
-        const timeSpent = now - startTime;
-        saveTimeData(currentUrl, timeSpent);
+    // Save time for previous URL session
+    if (trackingState.currentUrl && trackingState.startTime > 0) {
+        const session = trackingState.getCurrentSession();
+        saveTimeData(session.url, session.duration);
     }
 
     // Start tracking new URL
-    currentUrl = url;
-    startTime = now;
-
-    console.log('📊 Background: Tracking URL:', url);
+    trackingState.setCurrentSession(url, now);
+    console.log('📊 Background: Now tracking:', url);
 }
 
 async function saveTimeData(url, timeMs) {
+    if (timeMs <= 0) return;
+
     try {
         const today = getLocalDateString(new Date());
         const key = `data_${today}`;
@@ -108,106 +186,99 @@ async function saveTimeData(url, timeMs) {
         data[url] = (data[url] || 0) + timeMs;
 
         await chrome.storage.local.set({ [key]: data });
-
-        console.log(`💾 Background: Saved ${timeMs}ms for ${url}`);
+        console.log(`💾 Background: Saved ${Math.round(timeMs/1000)}s for ${url}`);
     } catch (error) {
         console.error('❌ Background: Error saving time data:', error);
     }
 }
 
-function getLocalDateString(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
+// ==================== MESSAGE HANDLING ====================
 
-// Message handling
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('📡 Background: Received message:', message);
+    console.log('📡 Background: Received message:', message.action);
 
-    if (message.action === 'getTrackingState') {
-        getTrackingState().then(state => sendResponse(state));
-        return true;
-    } else if (message.action === 'enableTracking') {
-        enableTracking().then(result => sendResponse(result));
-        return true;
-    } else if (message.action === 'disableTracking') {
-        disableTracking(message.autoResumeMinutes).then(result => sendResponse(result));
-        return true;
-    } else if (message.action === 'startAutoResumeTimer') {
-        startBackgroundAutoResumeTimer(message.endTime);
-        sendResponse({ success: true });
-        return false;
-    } else if (message.action === 'cancelAutoResumeTimer') {
-        cancelBackgroundAutoResumeTimer();
-        sendResponse({ success: true });
-        return false;
+    const handlers = {
+        'getTrackingState': handleGetTrackingState,
+        'enableTracking': handleEnableTracking,
+        'disableTracking': handleDisableTracking,
+        'startAutoResumeTimer': handleStartAutoResumeTimer,
+        'cancelAutoResumeTimer': handleCancelAutoResumeTimer
+    };
+
+    const handler = handlers[message.action];
+    if (handler) {
+        handler(message, sendResponse);
+        return true; // Keep message channel open for async response
     }
 
+    console.warn('⚠️ Background: Unknown message action:', message.action);
+    sendResponse({ success: false, error: 'Unknown action' });
     return false;
 });
 
-// Tracking state management
-async function getTrackingState() {
+async function handleGetTrackingState(message, sendResponse) {
     try {
-        const result = await chrome.storage.local.get(['isTracking']);
-        const trackingState = result.isTracking !== false;
-        return { isTracking: trackingState };
+        sendResponse({ isTracking: trackingState.isTracking });
     } catch (error) {
         console.error('❌ Background: Error getting tracking state:', error);
-        return { isTracking: false };
+        sendResponse({ isTracking: false });
     }
 }
 
-async function enableTracking() {
+async function handleEnableTracking(message, sendResponse) {
     try {
-        isTracking = true;
-        await chrome.storage.local.set({ isTracking: true });
+        await saveTrackingState(true);
 
-        // Start tracking current tab
+        // Start tracking current tab if available
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tabs.length > 0 && tabs[0].url) {
             handleUrlChange(tabs[0].url);
         }
 
         console.log('✅ Background: Tracking enabled');
-        return { success: true };
+        sendResponse({ success: true });
     } catch (error) {
         console.error('❌ Background: Error enabling tracking:', error);
-        return { success: false, error: error.message };
+        sendResponse({ success: false, error: error.message });
     }
 }
 
-async function disableTracking(autoResumeMinutes = 0) {
+async function handleDisableTracking(message, sendResponse) {
     try {
         // Save current session before disabling
-        if (currentUrl && startTime > 0) {
-            const timeSpent = Date.now() - startTime;
-            await saveTimeData(currentUrl, timeSpent);
+        if (trackingState.currentUrl && trackingState.startTime > 0) {
+            const session = trackingState.getCurrentSession();
+            await saveTimeData(session.url, session.duration);
         }
 
-        isTracking = false;
-        currentUrl = '';
-        startTime = 0;
+        await saveTrackingState(false);
+        trackingState.reset();
 
-        await chrome.storage.local.set({ isTracking: false });
-
+        const autoResumeMinutes = message.autoResumeMinutes || 0;
         console.log(`⏸️ Background: Tracking disabled${autoResumeMinutes ? ` with ${autoResumeMinutes} minute auto-resume` : ''}`);
-        return { success: true };
+        sendResponse({ success: true });
     } catch (error) {
         console.error('❌ Background: Error disabling tracking:', error);
-        return { success: false, error: error.message };
+        sendResponse({ success: false, error: error.message });
     }
 }
 
-// Auto-resume timer functions
+function handleStartAutoResumeTimer(message, sendResponse) {
+    startBackgroundAutoResumeTimer(message.endTime);
+    sendResponse({ success: true });
+}
+
+function handleCancelAutoResumeTimer(message, sendResponse) {
+    cancelBackgroundAutoResumeTimer();
+    sendResponse({ success: true });
+}
+
+// ==================== AUTO-RESUME TIMER MANAGEMENT ====================
+
 function startBackgroundAutoResumeTimer(endTime) {
     console.log('⏰ Background: Starting auto-resume timer');
 
-    if (autoResumeTimeoutId) {
-        clearTimeout(autoResumeTimeoutId);
-    }
+    cancelBackgroundAutoResumeTimer(); // Clear any existing timer
 
     const delay = endTime - Date.now();
 
@@ -216,19 +287,18 @@ function startBackgroundAutoResumeTimer(endTime) {
         return;
     }
 
-    autoResumeTimeoutId = setTimeout(() => {
+    trackingState.autoResumeTimeoutId = setTimeout(() => {
         executeAutoResume();
     }, delay);
 
-    console.log(`⏰ Background: Timer set for ${Math.floor(delay / 1000)} seconds`);
+    console.log(`⏰ Background: Timer set for ${Math.round(delay / 1000)} seconds`);
 }
 
 function cancelBackgroundAutoResumeTimer() {
-    console.log('🚫 Background: Cancelling auto-resume timer');
-
-    if (autoResumeTimeoutId) {
-        clearTimeout(autoResumeTimeoutId);
-        autoResumeTimeoutId = null;
+    if (trackingState.autoResumeTimeoutId) {
+        clearTimeout(trackingState.autoResumeTimeoutId);
+        trackingState.autoResumeTimeoutId = null;
+        console.log('🚫 Background: Auto-resume timer cancelled');
     }
 }
 
@@ -236,110 +306,167 @@ async function executeAutoResume() {
     console.log('✅ Background: Executing auto-resume');
 
     try {
-        await enableTracking();
+        await saveTrackingState(true);
         await chrome.storage.local.remove(['autoResumeTimer']);
-        autoResumeTimeoutId = null;
+        trackingState.autoResumeTimeoutId = null;
 
-        chrome.notifications.create({
-            type: 'basic',
-            iconUrl: '../icons/icon48.png',
-            title: 'Chrome Time Tracker',
-            message: 'Tracking has been automatically resumed!'
-        });
+        // Start tracking current tab
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs.length > 0 && tabs[0].url) {
+            handleUrlChange(tabs[0].url);
+        }
+
+        // Notify user
+        await showNotification(
+            'Chrome Time Tracker',
+            'Tracking has been automatically resumed!',
+            '../icons/icon48.png'
+        );
 
         console.log('✅ Background: Auto-resume completed successfully');
-
     } catch (error) {
         console.error('❌ Background: Error during auto-resume:', error);
     }
 }
 
-async function checkForExistingTimer() {
+async function restoreAutoResumeTimer() {
     try {
         const result = await chrome.storage.local.get(['autoResumeTimer']);
         const timerData = result.autoResumeTimer;
 
-        if (timerData && timerData.active) {
-            const remaining = timerData.endTime - Date.now();
+        if (!timerData?.active) return;
 
-            if (remaining > 0) {
-                console.log('⏰ Background: Restored existing timer with', Math.floor(remaining / 1000), 'seconds remaining');
-                startBackgroundAutoResumeTimer(timerData.endTime);
-            } else {
-                console.log('⏰ Background: Existing timer expired, executing auto-resume');
-                executeAutoResume();
-            }
+        const remaining = timerData.endTime - Date.now();
+
+        if (remaining > 0) {
+            console.log('⏰ Background: Restored existing timer with', Math.round(remaining / 1000), 'seconds remaining');
+            startBackgroundAutoResumeTimer(timerData.endTime);
+        } else {
+            console.log('⏰ Background: Existing timer expired, executing auto-resume');
+            executeAutoResume();
         }
     } catch (error) {
-        console.error('❌ Background: Error checking for existing timer:', error);
+        console.error('❌ Background: Error restoring auto-resume timer:', error);
     }
 }
 
-// Data cleanup functions
+// ==================== AUTOMATIC DATA CLEANUP ====================
+
+function startAutomaticCleanup() {
+    console.log('🧹 Background: Starting automatic cleanup cycle');
+
+    // Run cleanup immediately on startup
+    performDataCleanup();
+
+    // Set up periodic cleanup
+    setInterval(() => {
+        console.log('🧹 Background: Running scheduled cleanup');
+        performDataCleanup();
+    }, CONFIG.CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000);
+}
+
 async function performDataCleanup() {
     try {
         console.log('🧹 Background: Starting automatic data cleanup...');
 
-        // Get all storage data
         const allData = await chrome.storage.local.get(null);
+        const cutoffDate = calculateDataCutoffDate();
+        const dataKeysToRemove = findDataKeysToRemove(allData, cutoffDate);
 
-        // Calculate cutoff date - start of the month that is 3 months ago
-        // This keeps current month + 2 previous months = 3 months total
-        const currentDate = new Date();
-        const cutoffDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - DATA_RETENTION_MONTHS, 1);
-        const cutoffDateStr = getLocalDateString(cutoffDate);
-
-        console.log(`🧹 Background: Cleaning data older than ${cutoffDateStr} (keeping current + 2 previous months)`);
-
-        // Find data keys to remove
-        const dataKeysToRemove = [];
-
-        Object.keys(allData).forEach(key => {
-            if (key.startsWith('data_')) {
-                const dateStr = key.replace('data_', '');
-
-                // Validate date format (YYYY-MM-DD)
-                if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-                    if (dateStr < cutoffDateStr) {
-                        dataKeysToRemove.push(key);
-                        console.log(`🗑️ Background: Marking for removal: ${key} (${dateStr})`);
-                    }
-                }
-            }
-        });
-
-        // Remove old data
         if (dataKeysToRemove.length > 0) {
             await chrome.storage.local.remove(dataKeysToRemove);
-
-            console.log(`✅ Background: Automatic cleanup completed - removed ${dataKeysToRemove.length} old data entries`);
-
-            // Store cleanup stats for potential debugging
-            await chrome.storage.local.set({
-                lastAutomaticCleanup: {
-                    timestamp: Date.now(),
-                    removedEntries: dataKeysToRemove.length,
-                    cutoffDate: cutoffDateStr
-                }
-            });
-
+            console.log(`✅ Background: Cleaned up ${dataKeysToRemove.length} old data entries`);
         } else {
             console.log('✅ Background: No old data found to clean up');
-
-            // Still update last cleanup timestamp
-            await chrome.storage.local.set({
-                lastAutomaticCleanup: {
-                    timestamp: Date.now(),
-                    removedEntries: 0,
-                    cutoffDate: cutoffDateStr
-                }
-            });
         }
 
-        return { success: true, removedEntries: dataKeysToRemove.length };
+        await saveCleanupMetadata(dataKeysToRemove.length, cutoffDate);
 
+        return { success: true, removedEntries: dataKeysToRemove.length };
     } catch (error) {
         console.error('❌ Background: Error during automatic cleanup:', error);
         return { success: false, error: error.message };
     }
 }
+
+function calculateDataCutoffDate() {
+    const currentDate = new Date();
+    const cutoffDate = new Date(
+        currentDate.getFullYear(),
+        currentDate.getMonth() - CONFIG.DATA_RETENTION_MONTHS,
+        1
+    );
+    const cutoffDateStr = getLocalDateString(cutoffDate);
+
+    console.log(`🧹 Background: Cutoff date for cleanup: ${cutoffDateStr} (keeping current + ${CONFIG.DATA_RETENTION_MONTHS-1} previous months)`);
+    return cutoffDateStr;
+}
+
+function findDataKeysToRemove(allData, cutoffDateStr) {
+    const dataKeysToRemove = [];
+
+    Object.keys(allData).forEach(key => {
+        if (key.startsWith('data_')) {
+            const dateStr = key.replace('data_', '');
+
+            // Validate date format (YYYY-MM-DD) and check if it's before cutoff
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr) && dateStr < cutoffDateStr) {
+                dataKeysToRemove.push(key);
+                console.log(`🗑️ Background: Marking for removal: ${key}`);
+            }
+        }
+    });
+
+    return dataKeysToRemove;
+}
+
+async function saveCleanupMetadata(removedEntries, cutoffDateStr) {
+    try {
+        await chrome.storage.local.set({
+            lastAutomaticCleanup: {
+                timestamp: Date.now(),
+                removedEntries: removedEntries,
+                cutoffDate: cutoffDateStr
+            }
+        });
+    } catch (error) {
+        console.error('❌ Background: Error saving cleanup metadata:', error);
+    }
+}
+
+// ==================== UTILITY FUNCTIONS ====================
+
+function getLocalDateString(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+async function showNotification(title, message, iconUrl) {
+    try {
+        await chrome.notifications.create({
+            type: 'basic',
+            iconUrl: iconUrl,
+            title: title,
+            message: message
+        });
+    } catch (error) {
+        console.error('❌ Background: Error showing notification:', error);
+    }
+}
+
+// ==================== ERROR HANDLING ====================
+
+// Global error handler for unhandled promise rejections
+self.addEventListener('unhandledrejection', (event) => {
+    console.error('❌ Background: Unhandled promise rejection:', event.reason);
+    event.preventDefault();
+});
+
+// Global error handler for uncaught exceptions
+self.addEventListener('error', (event) => {
+    console.error('❌ Background: Uncaught error:', event.error);
+});
+
+console.log('🚀 Background: Service worker script loaded');

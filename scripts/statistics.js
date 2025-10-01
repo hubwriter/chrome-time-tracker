@@ -1,3 +1,76 @@
+/**
+ * Chrome Time Tracker - Statistics Manager
+ *
+ * This script manages the user interface and data visualization for the Chrome Time Tracker extension.
+ * It runs in the browser context of the statistics page and handles:
+ *
+ * 1. User Interface Management:
+ *    - Calendar navigation with month/date selection
+ *    - Interactive data tables with sorting and pagination
+ *    - Toggle switches for tracking and auto-refresh controls
+ *    - Responsive design and mobile-friendly interactions
+ *
+ * 2. Data Visualization:
+ *    - Interactive pie charts using Chart.js library
+ *    - Domain-consistent color coding for websites
+ *    - Legend manipulation (hide/show chart entries)
+ *    - Dynamic chart filtering based on 1% time threshold
+ *
+ * 3. Real-time Data Management:
+ *    - Auto-refresh functionality (10-second intervals)
+ *    - Manual refresh with user feedback
+ *    - Live data synchronization with background script
+ *    - Change detection and selective UI updates
+ *
+ * 4. Auto-Resume Timer Interface:
+ *    - Visual countdown timer display
+ *    - Start/stop/cancel timer controls
+ *    - Persistent timer state across page reloads
+ *    - Integration with background service worker
+ *
+ * 5. Date Navigation & URL Management:
+ *    - Calendar-based date selection (current + 2 months back)
+ *    - URL parameter handling for bookmarkable dates
+ *    - Browser history integration with back/forward navigation
+ *    - Automatic today selection for current month
+ *
+ * 6. Communication Layer:
+ *    - Message passing with background service worker
+ *    - Chrome storage API interactions for data retrieval
+ *    - Error handling and user notifications
+ *    - State synchronization between UI and background
+ *
+ * Key Features:
+ * - Responsive calendar grid with data indicators
+ * - Sortable website statistics table (top 20 + expand all)
+ * - Interactive pie charts with click-to-hide legend entries
+ * - Real-time tracking controls with visual feedback
+ * - Auto-resume functionality with countdown display
+ * - Automatic data refresh with change notifications
+ *
+ * Data Flow:
+ * 1. User selects date from calendar
+ * 2. Statistics manager loads data from Chrome storage
+ * 3. Data is processed and displayed in table + chart format
+ * 4. Real-time updates refresh data every 10 seconds
+ * 5. User interactions update both UI state and background tracking
+ *
+ * Storage Dependencies:
+ * - `data_YYYY-MM-DD`: Daily website time data for visualization
+ * - `isTracking`: Current tracking state for toggle switches
+ * - `autoResumeTimer`: Timer state for countdown display
+ *
+ * External Dependencies:
+ * - Chart.js: For pie chart rendering and interactions
+ * - Chrome Extensions API: For storage and message passing
+ * - CSS Grid/Flexbox: For responsive layout and animations
+ *
+ * @requires Chart.js
+ * @requires Chrome Extensions API
+ */
+
+// ==================== MAIN STATISTICS MANAGER CLASS ====================
+
 class StatisticsManager {
     constructor() {
         this.currentDate = new Date();
