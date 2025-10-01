@@ -28,6 +28,13 @@ h1 {
     font-weight: 600;
 }
 
+h2 {
+    margin: 0 0 20px 0;
+    color: #1a202c;
+    font-size: 20px;
+    font-weight: 600;
+}
+
 .header-controls {
     display: flex;
     align-items: center;
@@ -304,7 +311,7 @@ input:checked + .slider:before {
     padding: 40px;
 }
 
-.statistics-content h3 {
+.statistics-content h2 {
     margin-top: 0;
     margin-bottom: 20px;
     color: #1a202c;
@@ -371,6 +378,13 @@ td:last-child {
     flex-direction: column;
 }
 
+.chart-container h2 {
+    margin: 0 0 10px 0;
+    color: #1a202c;
+    font-size: 20px;
+    font-weight: 600;
+}
+
 #pieChart {
     max-height: 400px;
     width: 100% !important;
@@ -411,70 +425,6 @@ td:last-child {
     min-height: 200px;
 }
 
-/* Data Cleanup Styles */
-.cleanup-info-container {
-    background: #f0f9ff;
-    border: 1px solid #bae6fd;
-    border-radius: 8px;
-    padding: 15px;
-    margin-top: 30px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    transition: background-color 0.2s;
-}
-
-.cleanup-summary {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 14px;
-}
-
-.cleanup-icon {
-    font-size: 18px;
-}
-
-.cleanup-text {
-    font-weight: 500;
-    color: #0369a1;
-}
-
-.cleanup-status {
-    color: #64748b;
-    font-size: 13px;
-}
-
-.manual-cleanup-btn {
-    background: #0ea5e9;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    transition: background-color 0.2s;
-}
-
-.manual-cleanup-btn:hover {
-    background: #0284c7;
-}
-
-.manual-cleanup-btn:disabled {
-    background: #94a3b8;
-    cursor: not-allowed;
-}
-
-.cleanup-info-container.cleanup-running {
-    background: #fef3c7;
-    border-color: #fcd34d;
-}
-
-.cleanup-info-container.cleanup-running .cleanup-text {
-    color: #92400e;
-}
-
 /* Responsive adjustments */
 @media (max-width: 768px) {
     header {
@@ -504,16 +454,6 @@ td:last-child {
 
     #pieChart {
         max-height: 300px;
-    }
-
-    .cleanup-info-container {
-        flex-direction: column;
-        gap: 10px;
-        align-items: stretch;
-    }
-
-    .cleanup-summary {
-        justify-content: center;
     }
 
     .auto-resume-timer {
@@ -546,10 +486,6 @@ td:last-child {
 
 .chart-container {
     order: 2;
-}
-
-.cleanup-info-container {
-    order: 3;
 }
 
 /* Chart.js legend specific styling - ensure proper wrapping and spacing */

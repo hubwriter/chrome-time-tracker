@@ -1,32 +1,12 @@
-// Add this at the very top of your background.js file:
-console.log('🚀 Background script loaded at:', new Date().toISOString());
-
-// Handle extension icon clicks - add more debugging
-chrome.action.onClicked.addListener((tab) => {
-    console.log('🎯 Extension icon clicked!');
-    console.log('🎯 Current tab:', tab);
-
-    try {
-        // Open the welcome page in a new tab
-        chrome.tabs.create({
-            url: chrome.runtime.getURL('pages/welcome.html')
-        }, (newTab) => {
-            console.log('✅ New tab created:', newTab);
-        });
-    } catch (error) {
-        console.error('❌ Error creating tab:', error);
-    }
-});
-
-
 // Chrome Time Tracker - Background Script
 let currentUrl = '';
 let startTime = 0;
 let isTracking = true;
 let autoResumeTimeoutId = null;
 
-// Data retention constants
+// Data retention constants - keep current month + 2 previous months
 const DATA_RETENTION_MONTHS = 3;
+const CLEANUP_INTERVAL_HOURS = 6; // Run cleanup every 6 hours
 
 // Initialize on startup and install
 chrome.runtime.onStartup.addListener(() => {
@@ -47,7 +27,34 @@ async function initializeExtension() {
     // Check for existing auto-resume timer
     checkForExistingTimer();
 
+    // Start automatic cleanup cycle
+    startAutomaticCleanup();
+
     console.log('✅ Background: Extension initialized');
+}
+
+// Handle extension icon clicks - open welcome page in new tab
+chrome.action.onClicked.addListener((tab) => {
+    console.log('🎯 Extension icon clicked');
+
+    // Open the welcome page in a new tab
+    chrome.tabs.create({
+        url: chrome.runtime.getURL('pages/welcome.html')
+    });
+});
+
+// Automatic cleanup management
+function startAutomaticCleanup() {
+    console.log('🧹 Background: Starting automatic cleanup cycle');
+
+    // Run cleanup immediately on startup
+    performDataCleanup();
+
+    // Set up periodic cleanup every 6 hours
+    setInterval(() => {
+        console.log('🧹 Background: Running scheduled cleanup');
+        performDataCleanup();
+    }, CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000);
 }
 
 // Tab and URL tracking
@@ -136,17 +143,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         cancelBackgroundAutoResumeTimer();
         sendResponse({ success: true });
         return false;
-    } else if (message.action === 'getCleanupStats') {
-        getCleanupStats().then(stats => sendResponse(stats));
-        return true;
-    } else if (message.action === 'manualCleanup') {
-        performDataCleanup().then((result) => {
-            sendResponse({ success: true, removedEntries: result.removedEntries });
-        }).catch(error => {
-            console.error('❌ Background: Manual cleanup error:', error);
-            sendResponse({ success: false, error: error.message });
-        });
-        return true;
     }
 
     return false;
@@ -282,28 +278,24 @@ async function checkForExistingTimer() {
 // Data cleanup functions
 async function performDataCleanup() {
     try {
-        console.log('🧹 Background: Starting data cleanup...');
+        console.log('🧹 Background: Starting automatic data cleanup...');
 
         // Get all storage data
         const allData = await chrome.storage.local.get(null);
 
-        // Calculate cutoff date (3 months ago)
-        const cutoffDate = new Date();
-        cutoffDate.setMonth(cutoffDate.getMonth() - DATA_RETENTION_MONTHS);
+        // Calculate cutoff date - start of the month that is 3 months ago
+        // This keeps current month + 2 previous months = 3 months total
+        const currentDate = new Date();
+        const cutoffDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - DATA_RETENTION_MONTHS, 1);
         const cutoffDateStr = getLocalDateString(cutoffDate);
 
-        console.log(`🧹 Background: Cleaning data older than ${cutoffDateStr}`);
+        console.log(`🧹 Background: Cleaning data older than ${cutoffDateStr} (keeping current + 2 previous months)`);
 
         // Find data keys to remove
         const dataKeysToRemove = [];
-        let totalKeysChecked = 0;
-        let dataKeysFound = 0;
 
         Object.keys(allData).forEach(key => {
-            totalKeysChecked++;
-
             if (key.startsWith('data_')) {
-                dataKeysFound++;
                 const dateStr = key.replace('data_', '');
 
                 // Validate date format (YYYY-MM-DD)
@@ -320,33 +312,23 @@ async function performDataCleanup() {
         if (dataKeysToRemove.length > 0) {
             await chrome.storage.local.remove(dataKeysToRemove);
 
-            console.log(`✅ Background: Cleanup completed - removed ${dataKeysToRemove.length} old data entries`);
+            console.log(`✅ Background: Automatic cleanup completed - removed ${dataKeysToRemove.length} old data entries`);
 
-            // Store cleanup stats
+            // Store cleanup stats for potential debugging
             await chrome.storage.local.set({
-                lastCleanup: {
+                lastAutomaticCleanup: {
                     timestamp: Date.now(),
                     removedEntries: dataKeysToRemove.length,
                     cutoffDate: cutoffDateStr
                 }
             });
 
-            // Show notification about cleanup
-            if (dataKeysToRemove.length > 0) {
-                chrome.notifications.create('data-cleanup', {
-                    type: 'basic',
-                    iconUrl: '../icons/icon48.png',
-                    title: 'Chrome Time Tracker - Data Cleanup',
-                    message: `Cleaned up ${dataKeysToRemove.length} old data entries (older than ${DATA_RETENTION_MONTHS} months)`
-                });
-            }
-
         } else {
             console.log('✅ Background: No old data found to clean up');
 
             // Still update last cleanup timestamp
             await chrome.storage.local.set({
-                lastCleanup: {
+                lastAutomaticCleanup: {
                     timestamp: Date.now(),
                     removedEntries: 0,
                     cutoffDate: cutoffDateStr
@@ -357,31 +339,7 @@ async function performDataCleanup() {
         return { success: true, removedEntries: dataKeysToRemove.length };
 
     } catch (error) {
-        console.error('❌ Background: Error during data cleanup:', error);
-        throw error;
-    }
-}
-
-async function getCleanupStats() {
-    try {
-        const result = await chrome.storage.local.get(['lastCleanup']);
-        const allData = await chrome.storage.local.get(null);
-
-        // Count current data entries
-        const dataKeys = Object.keys(allData).filter(key => key.startsWith('data_'));
-        const totalDataEntries = dataKeys.length;
-
-        // Calculate storage size (rough estimate)
-        const storageSize = JSON.stringify(allData).length;
-
-        return {
-            lastCleanup: result.lastCleanup || null,
-            totalDataEntries: totalDataEntries,
-            estimatedStorageSize: storageSize,
-            retentionMonths: DATA_RETENTION_MONTHS
-        };
-    } catch (error) {
-        console.error('❌ Background: Error getting cleanup stats:', error);
-        return null;
+        console.error('❌ Background: Error during automatic cleanup:', error);
+        return { success: false, error: error.message };
     }
 }

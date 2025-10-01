@@ -32,9 +32,6 @@ class StatisticsManager {
             console.log('📊 StatisticsManager: Loading tracking state...');
             await this.loadTrackingState();
 
-            console.log('📊 StatisticsManager: Loading cleanup status...');
-            await this.loadCleanupStatus();
-
             console.log('📊 StatisticsManager: Updating calendar...');
             await this.updateCalendar();
 
@@ -117,7 +114,6 @@ class StatisticsManager {
 
             try {
                 await this.refreshCurrentData();
-                await this.loadCleanupStatus();
 
                 // Force update calendar to reflect any changes
                 await this.updateCalendar();
@@ -171,15 +167,6 @@ class StatisticsManager {
                 }
             } else {
                 console.log('📊 Data unchanged');
-            }
-
-            // Periodically refresh cleanup status (every 10 refreshes = ~100 seconds)
-            if (!this.refreshCount) this.refreshCount = 0;
-            this.refreshCount++;
-
-            if (this.refreshCount % 10 === 0) {
-                console.log('🧹 Refreshing cleanup status...');
-                await this.loadCleanupStatus();
             }
 
         } catch (error) {
@@ -277,7 +264,6 @@ class StatisticsManager {
         const autoResumeCheckbox = document.getElementById('autoResumeCheckbox');
         const autoResumeContainer = document.getElementById('autoResumeContainer');
         const cancelAutoResumeBtn = document.getElementById('cancelAutoResume');
-        const manualCleanupBtn = document.getElementById('manualCleanupBtn');
         const autoRefreshToggle = document.getElementById('autoRefreshToggle');
         const refreshStatsBtn = document.getElementById('refreshStatsBtn');
 
@@ -339,12 +325,6 @@ class StatisticsManager {
             });
         }
 
-        if (manualCleanupBtn) {
-            manualCleanupBtn.addEventListener('click', () => {
-                this.runManualCleanup();
-            });
-        }
-
         const prevBtn = document.getElementById('prevMonth');
         const nextBtn = document.getElementById('nextMonth');
 
@@ -364,104 +344,6 @@ class StatisticsManager {
 
         // Only check for existing auto-resume timer if tracking is disabled
         this.checkExistingAutoResumeTimer();
-    }
-
-    // Cleanup management methods
-    async loadCleanupStatus() {
-        try {
-            console.log('🧹 Loading cleanup status...');
-            const stats = await chrome.runtime.sendMessage({ action: 'getCleanupStats' });
-
-            if (stats) {
-                this.updateCleanupDisplay(stats);
-                console.log('🧹 Cleanup stats loaded:', stats);
-            } else {
-                console.warn('⚠️ No cleanup stats received');
-            }
-        } catch (error) {
-            console.error('❌ Error loading cleanup status:', error);
-        }
-    }
-
-    updateCleanupDisplay(stats) {
-        const statusElement = document.getElementById('cleanupStatus');
-
-        if (!statusElement || !stats) return;
-
-        const { lastCleanup, totalDataEntries } = stats;
-
-        if (lastCleanup) {
-            const lastCleanupDate = new Date(lastCleanup.timestamp);
-            const now = new Date();
-            const daysDiff = Math.floor((now - lastCleanupDate) / (24 * 60 * 60 * 1000));
-
-            let statusText = '';
-            if (daysDiff === 0) {
-                statusText = 'Last cleaned today';
-            } else if (daysDiff === 1) {
-                statusText = 'Last cleaned yesterday';
-            } else {
-                statusText = `Last cleaned ${daysDiff} days ago`;
-            }
-
-            if (lastCleanup.removedEntries > 0) {
-                statusText += ` (removed ${lastCleanup.removedEntries} entries)`;
-            }
-
-            statusElement.textContent = `${statusText} (${totalDataEntries} entries)`;
-        } else {
-            statusElement.textContent = `No cleanup performed yet (${totalDataEntries} entries)`;
-        }
-    }
-
-    async runManualCleanup() {
-        const manualCleanupBtn = document.getElementById('manualCleanupBtn');
-        const statusElement = document.getElementById('cleanupStatus');
-
-        if (!manualCleanupBtn || !statusElement) return;
-
-        try {
-            console.log('🧹 Running manual cleanup...');
-
-            manualCleanupBtn.disabled = true;
-            manualCleanupBtn.textContent = 'Cleaning...';
-            statusElement.textContent = 'Cleanup in progress...';
-
-            this.showNotification('🧹 Starting data cleanup...', 'info');
-
-            const response = await chrome.runtime.sendMessage({ action: 'manualCleanup' });
-
-            if (response && response.success) {
-                console.log('✅ Manual cleanup completed successfully');
-                this.showNotification('✅ Data cleanup completed!', 'success');
-
-                setTimeout(async () => {
-                    await this.loadCleanupStatus();
-                    await this.updateCalendar();
-
-                    if (this.selectedDate) {
-                        await this.loadDataForDate();
-                    }
-                }, 1000);
-
-            } else {
-                console.error('❌ Manual cleanup failed:', response?.error);
-                this.showNotification('❌ Cleanup failed. Please try again.', 'error');
-            }
-
-        } catch (error) {
-            console.error('❌ Error running manual cleanup:', error);
-            this.showNotification('❌ Cleanup error. Please try again.', 'error');
-        } finally {
-            manualCleanupBtn.disabled = false;
-            manualCleanupBtn.textContent = 'Run Cleanup Now';
-        }
-    }
-
-    formatStorageSize(bytes) {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     }
 
     async loadTrackingState() {
@@ -803,17 +685,21 @@ class StatisticsManager {
         const newDate = new Date(this.currentDate);
         newDate.setMonth(newDate.getMonth() + direction);
 
-        const twoMonthsAgo = new Date();
-        twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
-        twoMonthsAgo.setDate(1);
+        // Allow browsing back to 2 months prior to current month
+        const now = new Date();
+        const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
 
-        if (newDate < twoMonthsAgo) {
+        // Don't allow going before 2 months ago (start of that month)
+        if (newDate.getFullYear() < twoMonthsAgo.getFullYear() ||
+            (newDate.getFullYear() === twoMonthsAgo.getFullYear() && newDate.getMonth() < twoMonthsAgo.getMonth())) {
+            console.log('📅 Cannot navigate before 2 months ago');
             return;
         }
 
-        const now = new Date();
+        // Don't allow going beyond current month
         if (newDate.getFullYear() > now.getFullYear() ||
             (newDate.getFullYear() === now.getFullYear() && newDate.getMonth() > now.getMonth())) {
+            console.log('📅 Cannot navigate beyond current month');
             return;
         }
 
@@ -868,19 +754,26 @@ class StatisticsManager {
 
         if (!prevBtn || !nextBtn) return;
 
-        const twoMonthsAgo = new Date();
-        twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
-        const prevMonth = new Date(this.currentDate);
-        prevMonth.setMonth(prevMonth.getMonth() - 1);
-
-        prevBtn.disabled = prevMonth < twoMonthsAgo;
-
         const now = new Date();
-        const nextMonth = new Date(this.currentDate);
-        nextMonth.setMonth(nextMonth.getMonth() + 1);
 
+        // Calculate boundary dates
+        const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        const prevMonth = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth() - 1, 1);
+        const nextMonth = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth() + 1, 1);
+
+        // Disable prev button if previous month would be before 2 months ago
+        prevBtn.disabled = prevMonth.getFullYear() < twoMonthsAgo.getFullYear() ||
+                          (prevMonth.getFullYear() === twoMonthsAgo.getFullYear() &&
+                           prevMonth.getMonth() < twoMonthsAgo.getMonth());
+
+        // Disable next button if next month would be after current month
         nextBtn.disabled = nextMonth.getFullYear() > now.getFullYear() ||
-                          (nextMonth.getFullYear() === now.getFullYear() && nextMonth.getMonth() > now.getMonth());
+                          (nextMonth.getFullYear() === now.getFullYear() &&
+                           nextMonth.getMonth() > now.getMonth());
+
+        console.log(`📅 Navigation: prev disabled=${prevBtn.disabled}, next disabled=${nextBtn.disabled}`);
+        console.log(`📅 Current month: ${this.currentDate.getFullYear()}-${this.currentDate.getMonth() + 1}`);
+        console.log(`📅 Two months ago: ${twoMonthsAgo.getFullYear()}-${twoMonthsAgo.getMonth() + 1}`);
     }
 
     async generateCalendarGrid(container) {
@@ -1170,7 +1063,8 @@ class StatisticsManager {
         const colors = this.generateDomainConsistentColors(visibleEntries);
         const originalUrls = visibleEntries.map(([url]) => url);
 
-        // Add chart explanation
+        // Add pie chart heading and explanation
+        this.addPieChartHeading();
         this.addChartExplanation(filteredEntries.length, sortedEntries.length);
 
         // Check if Chart.js is available
@@ -1283,6 +1177,30 @@ class StatisticsManager {
         }
     }
 
+    addPieChartHeading() {
+        // Remove existing heading if present
+        const existingHeading = document.getElementById('pieChartHeading');
+        if (existingHeading) {
+            existingHeading.remove();
+        }
+
+        const chartContainer = document.getElementById('chartContainer');
+        if (!chartContainer) return;
+
+        const heading = document.createElement('h2');
+        heading.id = 'pieChartHeading';
+        heading.textContent = 'Pie chart';
+        heading.style.cssText = `
+            margin: 0 0 10px 0;
+            color: #1a202c;
+            font-size: 20px;
+            font-weight: 600;
+        `;
+
+        // Insert at the beginning of the chart container
+        chartContainer.insertBefore(heading, chartContainer.firstChild);
+    }
+
     addChartExplanation(filteredCount, totalCount) {
         // Remove existing explanation if present
         const existingExplanation = document.getElementById('chartExplanation');
@@ -1319,7 +1237,7 @@ class StatisticsManager {
 
         explanation.textContent = explanationText;
 
-        // Insert before the canvas
+        // Insert before the canvas (after the heading)
         const canvas = document.getElementById('pieChart');
         chartContainer.insertBefore(explanation, canvas);
     }
@@ -1328,19 +1246,23 @@ class StatisticsManager {
         const chartContainer = document.getElementById('chartContainer');
         if (!chartContainer) return;
 
-        chartContainer.innerHTML = `
-            <div style="
-                text-align: center;
-                padding: 40px 20px;
-                color: #718096;
-                font-style: italic;
-                background: #f7fafc;
-                border-radius: 8px;
-                border: 1px solid #e2e8f0;
-            ">
-                ${message}
-            </div>
+        // Add pie chart heading first
+        this.addPieChartHeading();
+
+        // Then add the message
+        const messageDiv = document.createElement('div');
+        messageDiv.style.cssText = `
+            text-align: center;
+            padding: 40px 20px;
+            color: #718096;
+            font-style: italic;
+            background: #f7fafc;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
         `;
+        messageDiv.textContent = message;
+
+        chartContainer.appendChild(messageDiv);
     }
 
     toggleChartItem(url) {
@@ -1521,27 +1443,3 @@ function initializeStatsManager() {
 
 // Start initialization
 initializeWhenReady();
-
-// Add cleanup notification listener
-if (chrome.notifications) {
-    chrome.notifications.onClicked.addListener((notificationId) => {
-        if (notificationId === 'data-cleanup') {
-            console.log('🧹 Cleanup notification clicked - refreshing cleanup status');
-            if (window.statsManager) {
-                window.statsManager.loadCleanupStatus();
-            }
-        }
-    });
-}
-
-// Listen for storage changes that might indicate cleanup
-if (chrome.storage && chrome.storage.onChanged) {
-    chrome.storage.onChanged.addListener((changes, namespace) => {
-        if (namespace === 'local' && changes.lastCleanup) {
-            console.log('🧹 Cleanup status changed, refreshing display');
-            if (window.statsManager) {
-                window.statsManager.loadCleanupStatus();
-            }
-        }
-    });
-}
