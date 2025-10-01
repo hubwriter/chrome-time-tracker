@@ -8,6 +8,8 @@
  *    - Monitors active tab changes and URL navigation
  *    - Records time spent on each website in Chrome local storage
  *    - Excludes Chrome internal pages and extension pages
+ *    - Filters out page visits shorter than 3 seconds
+ *    - Normalizes URLs by removing query parameters
  *
  * 2. Tracking State Management:
  *    - Maintains global tracking enabled/disabled state
@@ -45,7 +47,8 @@
 const CONFIG = {
     DATA_RETENTION_MONTHS: 3,      // Keep current month + 2 previous months
     CLEANUP_INTERVAL_HOURS: 6,     // Run cleanup every 6 hours
-    EXCLUDED_URL_PREFIXES: ['chrome://', 'chrome-extension://']
+    EXCLUDED_URL_PREFIXES: ['chrome://', 'chrome-extension://'],
+    MIN_VISIT_DURATION_MS: 3000    // Minimum 3 seconds to record a visit
 };
 
 // ==================== STATE MANAGEMENT ====================
@@ -79,6 +82,23 @@ class TrackingState {
     isValidUrl(url) {
         if (!url) return false;
         return !CONFIG.EXCLUDED_URL_PREFIXES.some(prefix => url.startsWith(prefix));
+    }
+
+    isValidDuration(durationMs) {
+        return durationMs >= CONFIG.MIN_VISIT_DURATION_MS;
+    }
+
+    normalizeUrl(url) {
+        if (!url) return url;
+
+        try {
+            const urlObj = new URL(url);
+            // Return URL without query parameters or fragments
+            return `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
+        } catch (error) {
+            console.warn('⚠️ Background: Failed to parse URL, using original:', url);
+            return url;
+        }
     }
 }
 
@@ -175,22 +195,35 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     }
 });
 
-function handleUrlChange(url) {
-    if (!trackingState.isValidUrl(url)) {
+function handleUrlChange(rawUrl) {
+    if (!trackingState.isValidUrl(rawUrl)) {
         return;
     }
 
+    // Normalize URL by removing query parameters
+    const normalizedUrl = trackingState.normalizeUrl(rawUrl);
     const now = Date.now();
 
-    // Save time for previous URL session
+    // Save time for previous URL session if it meets minimum duration
     if (trackingState.currentUrl && trackingState.startTime > 0) {
         const session = trackingState.getCurrentSession();
-        saveTimeData(session.url, session.duration);
+
+        if (trackingState.isValidDuration(session.duration)) {
+            saveTimeData(session.url, session.duration);
+        } else {
+            console.log(`⏭️ Background: Skipping short visit (${Math.round(session.duration/1000)}s) to ${session.url}`);
+        }
     }
 
-    // Start tracking new URL
-    trackingState.setCurrentSession(url, now);
-    console.log('📊 Background: Now tracking:', url);
+    // Start tracking new URL (use normalized URL)
+    trackingState.setCurrentSession(normalizedUrl, now);
+
+    // Log both URLs for debugging if they're different
+    if (rawUrl !== normalizedUrl) {
+        console.log(`📊 Background: Now tracking: ${normalizedUrl} (normalized from ${rawUrl})`);
+    } else {
+        console.log('📊 Background: Now tracking:', normalizedUrl);
+    }
 }
 
 async function saveTimeData(url, timeMs) {
@@ -265,10 +298,15 @@ async function handleEnableTracking(message, sendResponse) {
 
 async function handleDisableTracking(message, sendResponse) {
     try {
-        // Save current session before disabling
+        // Save current session before disabling (if it meets minimum duration)
         if (trackingState.currentUrl && trackingState.startTime > 0) {
             const session = trackingState.getCurrentSession();
-            await saveTimeData(session.url, session.duration);
+
+            if (trackingState.isValidDuration(session.duration)) {
+                await saveTimeData(session.url, session.duration);
+            } else {
+                console.log(`⏭️ Background: Current session too short (${Math.round(session.duration/1000)}s), not saving`);
+            }
         }
 
         await saveTrackingState(false);
