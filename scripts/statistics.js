@@ -9,7 +9,6 @@ class StatisticsManager {
         this.isPageVisible = true;
         this.chartHiddenItems = new Set();
         this.countdownInterval = null;
-        this.refreshCount = 0;
         this.autoRefreshEnabled = true;
 
         console.log('📊 StatisticsManager: Initializing...');
@@ -20,49 +19,27 @@ class StatisticsManager {
         try {
             console.log('📊 StatisticsManager: Starting initialization...');
 
-            console.log('📊 StatisticsManager: Testing Chart.js availability...');
-            console.log('📊 Chart.js available:', typeof Chart !== 'undefined');
-            if (typeof Chart !== 'undefined') {
-                console.log('📊 Chart.js version:', Chart.version || 'Unknown');
-            }
-
-            console.log('📊 StatisticsManager: Setting up event listeners...');
             this.setupEventListeners();
-
-            console.log('📊 StatisticsManager: Loading tracking state...');
             await this.loadTrackingState();
-
-            console.log('📊 StatisticsManager: Updating calendar...');
             await this.updateCalendar();
-
-            console.log('📊 StatisticsManager: Auto-selecting today...');
             await this.autoSelectToday();
-
-            console.log('📊 StatisticsManager: Starting auto-refresh...');
             this.startAutoRefresh();
-
-            console.log('📊 StatisticsManager: Debugging storage data...');
-            await this.debugStorageData();
 
             console.log('✅ StatisticsManager: Initialization complete');
         } catch (error) {
             console.error('❌ StatisticsManager: Initialization error:', error);
-            console.error('❌ Error stack:', error.stack);
-
-            // Show error in UI
-            const monthElement = document.getElementById('currentMonth');
-            if (monthElement) {
-                monthElement.textContent = `Error: ${error.message}`;
-            }
+            this.showError(`Initialization failed: ${error.message}`);
         }
     }
+
+    // ==================== AUTO-REFRESH MANAGEMENT ====================
 
     startAutoRefresh() {
         console.log('🔄 Setting up auto-refresh (10 second intervals)');
 
         document.addEventListener('visibilitychange', () => {
             this.isPageVisible = !document.hidden;
-            console.log(`👁️ Page visibility changed: ${this.isPageVisible ? 'visible' : 'hidden'}`);
+            console.log(`👁️ Page visibility: ${this.isPageVisible ? 'visible' : 'hidden'}`);
 
             if (this.isPageVisible && this.autoRefreshEnabled) {
                 this.startAutoRefresh();
@@ -74,12 +51,8 @@ class StatisticsManager {
         this.stopAutoRefresh();
 
         if (this.isPageVisible && this.autoRefreshEnabled) {
-            this.autoRefreshInterval = setInterval(async () => {
-                console.log('🔄 Auto-refreshing data...');
-                await this.refreshCurrentData();
-            }, 10000);
-
-            console.log('✅ Auto-refresh started (10 second intervals)');
+            this.autoRefreshInterval = setInterval(() => this.refreshCurrentData(), 10000);
+            console.log('✅ Auto-refresh started');
         }
     }
 
@@ -104,286 +77,174 @@ class StatisticsManager {
 
     async manualRefreshStats() {
         console.log('🔄 Manual refresh requested');
-
-        // Show immediate feedback
         const refreshBtn = document.getElementById('refreshStatsBtn');
-        if (refreshBtn) {
-            const originalText = refreshBtn.textContent;
-            refreshBtn.textContent = '🔄 Refreshing...';
-            refreshBtn.disabled = true;
 
-            try {
-                await this.refreshCurrentData();
+        if (!refreshBtn) return;
 
-                // Force update calendar to reflect any changes
-                await this.updateCalendar();
+        const originalText = refreshBtn.textContent;
+        this.setButtonState(refreshBtn, '🔄 Refreshing...', true);
 
-                this.showNotification('✅ Statistics refreshed!', 'success');
-            } catch (error) {
-                console.error('❌ Error during manual refresh:', error);
-                this.showNotification('❌ Refresh failed', 'error');
-            } finally {
-                setTimeout(() => {
-                    refreshBtn.textContent = originalText;
-                    refreshBtn.disabled = false;
-                }, 1000);
-            }
+        try {
+            await this.refreshCurrentData();
+            await this.updateCalendar();
+            this.showNotification('✅ Statistics refreshed!', 'success');
+        } catch (error) {
+            console.error('❌ Error during manual refresh:', error);
+            this.showNotification('❌ Refresh failed', 'error');
+        } finally {
+            setTimeout(() => this.setButtonState(refreshBtn, originalText, false), 1000);
         }
     }
 
     async refreshCurrentData() {
+        if (!this.selectedDate) {
+            console.log('⏭️ No date selected, skipping refresh');
+            return;
+        }
+
+        const dateStr = this.getLocalDateString(this.selectedDate);
+        console.log(`🔄 Refreshing data for ${dateStr}...`);
+
         try {
-            if (!this.selectedDate) {
-                console.log('⏭️ No date selected, skipping refresh');
-                return;
-            }
-
-            const dateStr = this.getLocalDateString(this.selectedDate);
-            console.log(`🔄 Refreshing data for ${dateStr}...`);
-
             const result = await chrome.storage.local.get([`data_${dateStr}`]);
             const newData = result[`data_${dateStr}`] || {};
 
-            const oldDataString = JSON.stringify(this.currentData);
-            const newDataString = JSON.stringify(newData);
-
-            if (oldDataString !== newDataString) {
+            if (JSON.stringify(this.currentData) !== JSON.stringify(newData)) {
                 console.log('📊 Data has changed, updating display');
-                console.log('📊 New data:', newData);
-
                 this.currentData = newData;
-
-                if (Object.keys(this.currentData).length === 0) {
-                    this.showNoDataMessage();
-                } else {
-                    this.displayStatistics();
-                }
-
+                this.displayDataOrNoDataMessage();
                 await this.updateCalendar();
 
-                // Only show auto-refresh notification if it's not a manual refresh
                 if (this.autoRefreshEnabled) {
                     this.showRefreshNotification();
                 }
-            } else {
-                console.log('📊 Data unchanged');
             }
-
         } catch (error) {
             console.error('❌ Error refreshing data:', error);
         }
     }
 
     showRefreshNotification() {
-        const notification = document.createElement('div');
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: #22c55e;
-            color: white;
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-size: 14px;
-            z-index: 1000;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-            pointer-events: none;
-        `;
-        notification.textContent = '🔄 Data updated';
-
-        document.body.appendChild(notification);
-
-        setTimeout(() => {
-            notification.style.opacity = '1';
-        }, 100);
-
-        setTimeout(() => {
-            notification.style.opacity = '0';
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
-                }
-            }, 300);
-        }, 2000);
+        this.showNotification('🔄 Data updated', 'success', 2000);
     }
 
-    getLocalDateString(date) {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    }
-
-    createDateFromCalendarDay(year, month, day) {
-        return new Date(year, month, day, 12, 0, 0);
-    }
-
-    async autoSelectToday() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const dateParam = urlParams.get('date');
-
-        if (!dateParam) {
-            console.log('📅 Auto-selecting today');
-            const today = new Date();
-            await this.selectDate(today);
-        } else {
-            console.log('📅 URL has date parameter, using that instead');
-            this.updateFromUrl();
-        }
-    }
-
-    async debugStorageData() {
-        try {
-            const allData = await chrome.storage.local.get(null);
-            console.log('📊 All storage data:', allData);
-
-            const today = new Date();
-            const todayStr = this.getLocalDateString(today);
-            const todayKey = `data_${todayStr}`;
-            console.log(`📅 Today's key: ${todayKey}`);
-            console.log(`📈 Today's data:`, allData[todayKey]);
-
-            if (allData[todayKey]) {
-                const entries = Object.entries(allData[todayKey]);
-                console.log(`📊 Today has ${entries.length} URLs:`, entries);
-            }
-
-            const dataKeys = Object.keys(allData).filter(key => key.startsWith('data_'));
-            console.log('🗂️ Available data keys:', dataKeys);
-
-            return allData;
-        } catch (error) {
-            console.error('❌ Error checking storage data:', error);
-            return {};
-        }
-    }
+    // ==================== EVENT LISTENERS ====================
 
     setupEventListeners() {
+        this.setupTrackingControls();
+        this.setupRefreshControls();
+        this.setupAutoResumeControls();
+        this.setupCalendarControls();
+        this.setupTableControls();
+        this.setupWindowEvents();
+        this.checkExistingAutoResumeTimer();
+    }
+
+    setupTrackingControls() {
         const trackingToggle = document.getElementById('trackingToggle');
-        const autoResumeCheckbox = document.getElementById('autoResumeCheckbox');
-        const autoResumeContainer = document.getElementById('autoResumeContainer');
-        const cancelAutoResumeBtn = document.getElementById('cancelAutoResume');
+        if (!trackingToggle) {
+            console.warn('⚠️ trackingToggle element not found');
+            return;
+        }
+
+        trackingToggle.addEventListener('change', async (e) => {
+            const isEnabled = e.target.checked;
+            console.log(`🔄 Tracking toggle changed: ${isEnabled}`);
+
+            if (isEnabled) {
+                await this.enableTracking();
+                this.hideAutoResumeContainer();
+                this.stopAutoResumeTimer();
+            } else {
+                await this.disableTracking(10);
+                this.showAutoResumeContainer();
+                this.startAutoResumeTimer(10);
+            }
+
+            this.updateToggleLabel(isEnabled);
+        });
+    }
+
+    setupRefreshControls() {
         const autoRefreshToggle = document.getElementById('autoRefreshToggle');
         const refreshStatsBtn = document.getElementById('refreshStatsBtn');
-
-        if (trackingToggle) {
-            trackingToggle.addEventListener('change', async (e) => {
-                const isEnabled = e.target.checked;
-
-                console.log(`🔄 Tracking toggle changed: ${isEnabled}`);
-
-                if (isEnabled) {
-                    // Tracking is being enabled
-                    await this.enableTracking();
-                    // Hide auto-resume container and stop any running timer
-                    if (autoResumeContainer) autoResumeContainer.style.display = 'none';
-                    this.stopAutoResumeTimer();
-                } else {
-                    // Tracking is being disabled
-                    if (autoResumeContainer && autoResumeCheckbox) {
-                        // Show the auto-resume container and set checkbox to checked by default
-                        autoResumeCheckbox.checked = true;
-                        autoResumeContainer.style.display = 'block';
-
-                        // Disable tracking first
-                        await this.disableTracking(10);
-
-                        // Since auto-resume is checked by default, start the timer immediately
-                        this.startAutoResumeTimer(10);
-                    } else {
-                        // Fallback if elements not found
-                        await this.disableTracking(0);
-                    }
-                }
-
-                this.updateToggleLabel(isEnabled);
-            });
-        } else {
-            console.warn('⚠️ trackingToggle element not found');
-        }
 
         if (autoRefreshToggle) {
             autoRefreshToggle.addEventListener('change', (e) => {
                 this.toggleAutoRefresh(e.target.checked);
             });
-        } else {
-            console.warn('⚠️ autoRefreshToggle element not found');
         }
 
         if (refreshStatsBtn) {
-            refreshStatsBtn.addEventListener('click', () => {
-                this.manualRefreshStats();
-            });
-        } else {
-            console.warn('⚠️ refreshStatsBtn element not found');
+            refreshStatsBtn.addEventListener('click', () => this.manualRefreshStats());
         }
+    }
 
+    setupAutoResumeControls() {
+        const cancelAutoResumeBtn = document.getElementById('cancelAutoResume');
         if (cancelAutoResumeBtn) {
-            cancelAutoResumeBtn.addEventListener('click', () => {
-                this.cancelAutoResume();
-            });
+            cancelAutoResumeBtn.addEventListener('click', () => this.cancelAutoResume());
         }
+    }
 
+    setupCalendarControls() {
         const prevBtn = document.getElementById('prevMonth');
         const nextBtn = document.getElementById('nextMonth');
 
         if (prevBtn) prevBtn.addEventListener('click', () => this.changeMonth(-1));
         if (nextBtn) nextBtn.addEventListener('click', () => this.changeMonth(1));
+    }
 
+    setupTableControls() {
         const expandBtn = document.getElementById('expandListBtn');
         if (expandBtn) {
             expandBtn.addEventListener('click', () => this.toggleUrlList());
         }
+    }
 
+    setupWindowEvents() {
         window.addEventListener('popstate', () => this.updateFromUrl());
         window.addEventListener('beforeunload', () => {
             this.stopAutoRefresh();
             this.stopAutoResumeTimer();
         });
-
-        // Only check for existing auto-resume timer if tracking is disabled
-        this.checkExistingAutoResumeTimer();
     }
+
+    // ==================== TRACKING STATE MANAGEMENT ====================
 
     async loadTrackingState() {
         try {
-            console.log('📡 Sending message to background script...');
+            console.log('📡 Loading tracking state...');
             const response = await chrome.runtime.sendMessage({ action: 'getTrackingState' });
             console.log('📡 Tracking state response:', response);
 
             const trackingToggle = document.getElementById('trackingToggle');
-            const autoResumeContainer = document.getElementById('autoResumeContainer');
+            if (!trackingToggle || !response) return;
 
-            if (trackingToggle && response) {
-                const isTracking = response.isTracking !== false;
-                trackingToggle.checked = isTracking;
-                this.updateToggleLabel(isTracking);
+            const isTracking = response.isTracking !== false;
+            trackingToggle.checked = isTracking;
+            this.updateToggleLabel(isTracking);
 
-                // Show auto-resume container if tracking is disabled
-                if (!isTracking && autoResumeContainer) {
-                    autoResumeContainer.style.display = 'block';
-
-                    // Check if there's an active auto-resume timer
-                    const result = await chrome.storage.local.get(['autoResumeTimer']);
-                    const timerData = result.autoResumeTimer;
-
-                    if (timerData && timerData.active) {
-                        // There's an active timer, it will be restored by checkExistingAutoResumeTimer
-                        console.log('⏰ Active timer found, will be restored');
-                    } else {
-                        // No active timer, show the reset state
-                        this.showResetAutoResumeState();
-                    }
-                } else {
-                    // Tracking is enabled, hide auto-resume container
-                    if (autoResumeContainer) {
-                        autoResumeContainer.style.display = 'none';
-                    }
-                }
+            if (!isTracking) {
+                await this.handleDisabledTrackingState();
+            } else {
+                this.hideAutoResumeContainer();
             }
         } catch (error) {
             console.error('❌ Error loading tracking state:', error);
+        }
+    }
+
+    async handleDisabledTrackingState() {
+        this.showAutoResumeContainer();
+
+        const result = await chrome.storage.local.get(['autoResumeTimer']);
+        const timerData = result.autoResumeTimer;
+
+        if (timerData?.active) {
+            console.log('⏰ Active timer found, will be restored');
+        } else {
+            this.showResetAutoResumeState();
         }
     }
 
@@ -415,13 +276,13 @@ class StatisticsManager {
         }
     }
 
-    // Auto-resume timer management
+    // ==================== AUTO-RESUME TIMER MANAGEMENT ====================
+
     async startAutoResumeTimer(minutes) {
         console.log(`⏰ Starting auto-resume timer for ${minutes} minutes`);
 
         const endTime = Date.now() + (minutes * 60 * 1000);
 
-        // Save timer state to storage
         await chrome.storage.local.set({
             autoResumeTimer: {
                 endTime: endTime,
@@ -430,13 +291,9 @@ class StatisticsManager {
             }
         });
 
-        // Show timer UI
         this.showAutoResumeTimer();
-
-        // Start countdown display
         this.startTimerCountdown(endTime);
 
-        // Notify background script
         try {
             await chrome.runtime.sendMessage({
                 action: 'startAutoResumeTimer',
@@ -451,124 +308,83 @@ class StatisticsManager {
         const timerElement = document.getElementById('timerCountdown');
         if (!timerElement) return;
 
-        // Clear existing timer
-        if (this.countdownInterval) {
-            clearInterval(this.countdownInterval);
-        }
+        this.stopAutoResumeTimer();
 
         this.countdownInterval = setInterval(() => {
             const remaining = endTime - Date.now();
 
             if (remaining <= 0) {
-                // Timer finished
                 this.onAutoResumeComplete();
                 return;
             }
 
-            // Update display
             const minutes = Math.floor(remaining / (60 * 1000));
             const seconds = Math.floor((remaining % (60 * 1000)) / 1000);
             timerElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-
         }, 1000);
     }
 
     showAutoResumeTimer() {
-        const timerContainer = document.getElementById('autoResumeTimer');
-        const autoResumeContainer = document.getElementById('autoResumeContainer');
-        const cancelBtn = document.getElementById('cancelAutoResume');
-
-        if (timerContainer && autoResumeContainer) {
-            timerContainer.style.display = 'flex';
-            autoResumeContainer.style.display = 'block';
-
-            // Hide the checkbox option
-            const autoResumeOption = document.querySelector('.auto-resume-option');
-            if (autoResumeOption) {
-                autoResumeOption.style.display = 'none';
-            }
-
-            // Update button text to show cancelling option
-            if (cancelBtn) {
-                cancelBtn.textContent = 'Cancel Auto-Resume';
-            }
-        }
+        this.updateAutoResumeUI(true, 'Cancel Auto-Resume');
     }
 
     showResetAutoResumeState() {
+        this.updateAutoResumeUI(false, 'Enable Auto-Resume');
+        const timerElement = document.getElementById('timerCountdown');
+        if (timerElement) timerElement.textContent = '10:00';
+        this.stopAutoResumeTimer();
+    }
+
+    updateAutoResumeUI(isActive, buttonText) {
         const timerContainer = document.getElementById('autoResumeTimer');
         const autoResumeContainer = document.getElementById('autoResumeContainer');
-        const timerElement = document.getElementById('timerCountdown');
         const cancelBtn = document.getElementById('cancelAutoResume');
+        const autoResumeOption = document.querySelector('.auto-resume-option');
         const autoResumeCheckbox = document.getElementById('autoResumeCheckbox');
 
-        if (autoResumeContainer) {
-            autoResumeContainer.style.display = 'block';
+        if (autoResumeContainer) autoResumeContainer.style.display = 'block';
+        if (timerContainer) timerContainer.style.display = 'flex';
+        if (autoResumeOption) autoResumeOption.style.display = 'none';
+        if (cancelBtn) cancelBtn.textContent = buttonText;
+        if (autoResumeCheckbox) autoResumeCheckbox.checked = true;
+    }
 
-            // Show timer in reset state
-            if (timerContainer) {
-                timerContainer.style.display = 'flex';
-            }
+    showAutoResumeContainer() {
+        const autoResumeContainer = document.getElementById('autoResumeContainer');
+        if (autoResumeContainer) autoResumeContainer.style.display = 'block';
+    }
 
-            // Hide the checkbox option
-            const autoResumeOption = document.querySelector('.auto-resume-option');
-            if (autoResumeOption) {
-                autoResumeOption.style.display = 'none';
-            }
-
-            // Set timer to 10:00 and stop countdown
-            if (timerElement) {
-                timerElement.textContent = '10:00';
-            }
-
-            // Update button to enable auto-resume
-            if (cancelBtn) {
-                cancelBtn.textContent = 'Enable Auto-Resume';
-            }
-
-            // Check the checkbox by default
-            if (autoResumeCheckbox) {
-                autoResumeCheckbox.checked = true;
-            }
-
-            // Stop any running countdown
-            this.stopAutoResumeTimer();
-        }
+    hideAutoResumeContainer() {
+        const autoResumeContainer = document.getElementById('autoResumeContainer');
+        if (autoResumeContainer) autoResumeContainer.style.display = 'none';
     }
 
     async cancelAutoResume() {
         console.log('🚫 Cancelling/toggling auto-resume timer');
 
         const cancelBtn = document.getElementById('cancelAutoResume');
-        const currentText = cancelBtn ? cancelBtn.textContent : '';
+        const currentText = cancelBtn?.textContent || '';
 
         if (currentText === 'Enable Auto-Resume') {
-            // Enable auto-resume (start the timer)
             console.log('▶️ Enabling auto-resume timer');
             this.startAutoResumeTimer(10);
             this.showNotification('⏰ Auto-resume enabled - tracking will resume in 10 minutes', 'info');
         } else {
-            // Cancel auto-resume (reset to stopped state)
             console.log('⏹️ Cancelling auto-resume timer');
-
-            // Stop countdown
-            this.stopAutoResumeTimer();
-
-            // Clear storage
-            await chrome.storage.local.remove(['autoResumeTimer']);
-
-            // Notify background script
-            try {
-                await chrome.runtime.sendMessage({ action: 'cancelAutoResumeTimer' });
-            } catch (error) {
-                console.error('❌ Error cancelling background timer:', error);
-            }
-
-            // Show reset state (keep container visible but reset timer)
+            await this.cancelActiveTimer();
             this.showResetAutoResumeState();
-
-            // Show notification
             this.showNotification('⏹️ Auto-resume cancelled', 'info');
+        }
+    }
+
+    async cancelActiveTimer() {
+        this.stopAutoResumeTimer();
+        await chrome.storage.local.remove(['autoResumeTimer']);
+
+        try {
+            await chrome.runtime.sendMessage({ action: 'cancelAutoResumeTimer' });
+        } catch (error) {
+            console.error('❌ Error cancelling background timer:', error);
         }
     }
 
@@ -582,29 +398,15 @@ class StatisticsManager {
     async onAutoResumeComplete() {
         console.log('✅ Auto-resume timer completed - enabling tracking');
 
-        // Stop timer
         this.stopAutoResumeTimer();
-
-        // Clear storage
         await chrome.storage.local.remove(['autoResumeTimer']);
-
-        // Enable tracking
         await this.enableTracking();
 
-        // Update UI
         const trackingToggle = document.getElementById('trackingToggle');
-        if (trackingToggle) {
-            trackingToggle.checked = true;
-        }
+        if (trackingToggle) trackingToggle.checked = true;
+
         this.updateToggleLabel(true);
-
-        // Hide auto-resume container
-        const autoResumeContainer = document.getElementById('autoResumeContainer');
-        if (autoResumeContainer) {
-            autoResumeContainer.style.display = 'none';
-        }
-
-        // Show notification
+        this.hideAutoResumeContainer();
         this.showNotification('🔄 Tracking automatically resumed!', 'success');
     }
 
@@ -613,116 +415,91 @@ class StatisticsManager {
             const result = await chrome.storage.local.get(['autoResumeTimer']);
             const timerData = result.autoResumeTimer;
 
-            if (timerData && timerData.active) {
-                // Only restore timer if tracking is currently disabled
-                const trackingResponse = await chrome.runtime.sendMessage({ action: 'getTrackingState' });
-                const isTracking = trackingResponse && trackingResponse.isTracking !== false;
+            if (!timerData?.active) return;
 
-                if (!isTracking) {
-                    const remaining = timerData.endTime - Date.now();
+            const trackingResponse = await chrome.runtime.sendMessage({ action: 'getTrackingState' });
+            const isTracking = trackingResponse?.isTracking !== false;
 
-                    if (remaining > 0) {
-                        console.log('⏰ Found existing auto-resume timer with', Math.floor(remaining / 1000), 'seconds remaining');
-                        this.showAutoResumeTimer();
-                        this.startTimerCountdown(timerData.endTime);
-                    } else {
-                        // Timer should have completed
-                        console.log('⏰ Existing timer has expired, cleaning up');
-                        await chrome.storage.local.remove(['autoResumeTimer']);
-                        this.showResetAutoResumeState();
-                    }
+            if (!isTracking) {
+                const remaining = timerData.endTime - Date.now();
+
+                if (remaining > 0) {
+                    console.log('⏰ Found existing auto-resume timer with', Math.floor(remaining / 1000), 'seconds remaining');
+                    this.showAutoResumeTimer();
+                    this.startTimerCountdown(timerData.endTime);
                 } else {
-                    // Tracking is enabled, so remove any stale timer data
-                    console.log('⏰ Tracking is enabled, removing stale auto-resume timer');
+                    console.log('⏰ Existing timer has expired, cleaning up');
                     await chrome.storage.local.remove(['autoResumeTimer']);
+                    this.showResetAutoResumeState();
                 }
+            } else {
+                console.log('⏰ Tracking is enabled, removing stale auto-resume timer');
+                await chrome.storage.local.remove(['autoResumeTimer']);
             }
         } catch (error) {
             console.error('❌ Error checking existing timer:', error);
         }
     }
 
-    showNotification(message, type = 'info') {
-        const notification = document.createElement('div');
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: ${type === 'success' ? '#22c55e' : type === 'error' ? '#dc3545' : '#0ea5e9'};
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            z-index: 1000;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-            pointer-events: none;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            max-width: 300px;
-        `;
-        notification.textContent = message;
+    // ==================== CALENDAR MANAGEMENT ====================
 
-        document.body.appendChild(notification);
+    async autoSelectToday() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const dateParam = urlParams.get('date');
 
-        // Fade in
-        setTimeout(() => {
-            notification.style.opacity = '1';
-        }, 100);
-
-        // Fade out and remove
-        setTimeout(() => {
-            notification.style.opacity = '0';
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
-                }
-            }, 300);
-        }, 4000);
+        if (!dateParam) {
+            console.log('📅 Auto-selecting today');
+            await this.selectDate(new Date());
+        } else {
+            console.log('📅 URL has date parameter, using that instead');
+            this.updateFromUrl();
+        }
     }
 
     changeMonth(direction) {
         const newDate = new Date(this.currentDate);
         newDate.setMonth(newDate.getMonth() + direction);
 
-        // Allow browsing back to 2 months prior to current month
+        if (!this.isValidMonthNavigation(newDate)) return;
+
+        this.currentDate = newDate;
+        this.selectedDate = null;
+
+        const now = new Date();
+        const isCurrentMonth = newDate.getFullYear() === now.getFullYear() &&
+                              newDate.getMonth() === now.getMonth();
+
+        if (isCurrentMonth) {
+            this.selectedDate = now;
+            this.updateUrl();
+            this.updateCalendar();
+            this.loadDataForDate();
+        } else {
+            this.updateCalendar();
+            this.updateUrl();
+            this.showNoDataMessage();
+        }
+    }
+
+    isValidMonthNavigation(newDate) {
         const now = new Date();
         const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
 
-        // Don't allow going before 2 months ago (start of that month)
+        // Don't allow going before 2 months ago
         if (newDate.getFullYear() < twoMonthsAgo.getFullYear() ||
             (newDate.getFullYear() === twoMonthsAgo.getFullYear() && newDate.getMonth() < twoMonthsAgo.getMonth())) {
             console.log('📅 Cannot navigate before 2 months ago');
-            return;
+            return false;
         }
 
         // Don't allow going beyond current month
         if (newDate.getFullYear() > now.getFullYear() ||
             (newDate.getFullYear() === now.getFullYear() && newDate.getMonth() > now.getMonth())) {
             console.log('📅 Cannot navigate beyond current month');
-            return;
+            return false;
         }
 
-        this.currentDate = newDate;
-        this.selectedDate = null;
-
-        // Check if we're displaying the current month
-        const isCurrentMonth = newDate.getFullYear() === now.getFullYear() &&
-                              newDate.getMonth() === now.getMonth();
-
-        if (isCurrentMonth) {
-            // Auto-select today's date when displaying current month
-            console.log('📅 Displaying current month, auto-selecting today');
-            this.selectedDate = now;
-            this.updateUrl();
-            this.updateCalendar();
-            this.loadDataForDate();
-        } else {
-            // For non-current months, just update calendar and show no data
-            this.updateCalendar();
-            this.updateUrl();
-            this.showNoDataMessage();
-        }
+        return true;
     }
 
     async updateCalendar() {
@@ -733,16 +510,13 @@ class StatisticsManager {
 
         if (!monthElement || !calendarElement) {
             console.error('❌ Calendar elements not found');
-            console.error('❌ monthElement:', monthElement);
-            console.error('❌ calendarElement:', calendarElement);
             return;
         }
 
-        const monthName = this.currentDate.toLocaleDateString('en-US', {
+        monthElement.textContent = this.currentDate.toLocaleDateString('en-US', {
             month: 'long',
             year: 'numeric'
         });
-        monthElement.textContent = monthName;
 
         this.updateNavigationButtons();
         await this.generateCalendarGrid(calendarElement);
@@ -755,33 +529,25 @@ class StatisticsManager {
         if (!prevBtn || !nextBtn) return;
 
         const now = new Date();
-
-        // Calculate boundary dates
         const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
         const prevMonth = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth() - 1, 1);
         const nextMonth = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth() + 1, 1);
 
-        // Disable prev button if previous month would be before 2 months ago
         prevBtn.disabled = prevMonth.getFullYear() < twoMonthsAgo.getFullYear() ||
                           (prevMonth.getFullYear() === twoMonthsAgo.getFullYear() &&
                            prevMonth.getMonth() < twoMonthsAgo.getMonth());
 
-        // Disable next button if next month would be after current month
         nextBtn.disabled = nextMonth.getFullYear() > now.getFullYear() ||
                           (nextMonth.getFullYear() === now.getFullYear() &&
                            nextMonth.getMonth() > now.getMonth());
-
-        console.log(`📅 Navigation: prev disabled=${prevBtn.disabled}, next disabled=${nextBtn.disabled}`);
-        console.log(`📅 Current month: ${this.currentDate.getFullYear()}-${this.currentDate.getMonth() + 1}`);
-        console.log(`📅 Two months ago: ${twoMonthsAgo.getFullYear()}-${twoMonthsAgo.getMonth() + 1}`);
     }
 
     async generateCalendarGrid(container) {
         console.log('📅 Generating calendar grid...');
         container.innerHTML = '';
 
-        const dayHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        dayHeaders.forEach(day => {
+        // Add day headers
+        ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
             const headerCell = document.createElement('div');
             headerCell.className = 'calendar-header-cell';
             headerCell.textContent = day;
@@ -793,60 +559,61 @@ class StatisticsManager {
         const today = new Date();
         const todayStr = this.getLocalDateString(today);
 
+        // Add empty cells for days before month start
         for (let i = 0; i < firstDay.getDay(); i++) {
             const emptyCell = document.createElement('div');
             emptyCell.className = 'calendar-day disabled';
             container.appendChild(emptyCell);
         }
 
+        // Add calendar days
         for (let day = 1; day <= lastDay.getDate(); day++) {
-            const dayElement = document.createElement('button');
-            dayElement.className = 'calendar-day';
-            dayElement.textContent = day;
-
-            const cellDate = this.createDateFromCalendarDay(
-                this.currentDate.getFullYear(),
-                this.currentDate.getMonth(),
-                day
-            );
-            const dateStr = this.getLocalDateString(cellDate);
-
-            const hasData = await this.hasDataForDate(dateStr);
-            if (hasData) {
-                dayElement.classList.add('has-data');
-                console.log(`📊 Day ${day} (${dateStr}) has data`);
-            }
-
-            const isToday = dateStr === todayStr;
-
-            if (cellDate > today && !isToday) {
-                dayElement.classList.add('future');
-                dayElement.disabled = true;
-            } else {
-                dayElement.addEventListener('click', () => {
-                    console.log(`🎯 Clicked on day ${day} (${dateStr})`);
-                    this.selectDate(cellDate);
-                });
-            }
-
-            if (this.selectedDate &&
-                cellDate.toDateString() === this.selectedDate.toDateString()) {
-                dayElement.classList.add('selected');
-                console.log(`✅ Day ${day} is selected`);
-            }
-
+            const dayElement = await this.createCalendarDay(day, todayStr, today);
             container.appendChild(dayElement);
         }
 
         console.log('📅 Calendar grid generated');
     }
 
+    async createCalendarDay(day, todayStr, today) {
+        const dayElement = document.createElement('button');
+        dayElement.className = 'calendar-day';
+        dayElement.textContent = day;
+
+        const cellDate = this.createDateFromCalendarDay(
+            this.currentDate.getFullYear(),
+            this.currentDate.getMonth(),
+            day
+        );
+        const dateStr = this.getLocalDateString(cellDate);
+
+        // Check if date has data
+        if (await this.hasDataForDate(dateStr)) {
+            dayElement.classList.add('has-data');
+        }
+
+        // Handle future dates
+        const isToday = dateStr === todayStr;
+        if (cellDate > today && !isToday) {
+            dayElement.classList.add('future');
+            dayElement.disabled = true;
+        } else {
+            dayElement.addEventListener('click', () => this.selectDate(cellDate));
+        }
+
+        // Handle selected date
+        if (this.selectedDate && cellDate.toDateString() === this.selectedDate.toDateString()) {
+            dayElement.classList.add('selected');
+        }
+
+        return dayElement;
+    }
+
     async hasDataForDate(dateStr) {
         try {
             const result = await chrome.storage.local.get([`data_${dateStr}`]);
             const data = result[`data_${dateStr}`];
-            const hasData = data && Object.keys(data).length > 0;
-            return hasData;
+            return data && Object.keys(data).length > 0;
         } catch (error) {
             console.error('❌ Error checking data for date:', error);
             return false;
@@ -855,18 +622,16 @@ class StatisticsManager {
 
     async selectDate(date) {
         console.log('🎯 Selecting date:', date);
-        const dateStr = this.getLocalDateString(date);
-        console.log('🎯 Date string for storage:', dateStr);
-
         this.selectedDate = date;
         this.updateUrl();
         await this.loadDataForDate();
         await this.updateCalendar();
     }
 
+    // ==================== DATA LOADING AND DISPLAY ====================
+
     async loadDataForDate() {
         if (!this.selectedDate) {
-            console.log('⚠️ No date selected');
             this.showNoDataMessage();
             return;
         }
@@ -878,70 +643,60 @@ class StatisticsManager {
             const result = await chrome.storage.local.get([`data_${dateStr}`]);
             this.currentData = result[`data_${dateStr}`] || {};
 
-            console.log('📊 Loaded data for', dateStr, ':', this.currentData);
-            console.log('📊 Number of URLs:', Object.keys(this.currentData).length);
-
-            if (Object.keys(this.currentData).length === 0) {
-                console.log('🚫 No data found for this date');
-                this.showNoDataMessage();
-            } else {
-                console.log('✅ Displaying statistics for', Object.keys(this.currentData).length, 'URLs');
-                this.displayStatistics();
-            }
+            console.log('📊 Loaded data for', dateStr, '- URLs:', Object.keys(this.currentData).length);
+            this.displayDataOrNoDataMessage();
         } catch (error) {
             console.error('❌ Error loading data for date:', error);
             this.showNoDataMessage();
         }
     }
 
-    showNoDataMessage() {
-        const noDataMessage = document.getElementById('noDataMessage');
-        const statisticsContent = document.getElementById('statisticsContent');
+    displayDataOrNoDataMessage() {
+        if (Object.keys(this.currentData).length === 0) {
+            this.showNoDataMessage();
+        } else {
+            this.displayStatistics();
+        }
+    }
 
+    showNoDataMessage() {
+        this.toggleStatisticsDisplay(false);
+        const noDataMessage = document.getElementById('noDataMessage');
         if (noDataMessage) {
             noDataMessage.style.display = 'block';
             noDataMessage.innerHTML = '<p>No viewing data available for this date.</p>';
         }
-        if (statisticsContent) {
-            statisticsContent.style.display = 'none';
-        }
-
-        console.log('💭 Showing no data message');
     }
 
     displayStatistics() {
-        console.log('📊 DisplayStatistics called with data:', this.currentData);
-        console.log('📊 Data entries:', Object.entries(this.currentData));
+        this.toggleStatisticsDisplay(true);
+        this.updateSelectedDateDisplay();
+        this.showingAllUrls = false;
+        this.updateTable();
+        this.updateChart();
+    }
 
+    toggleStatisticsDisplay(showStatistics) {
         const noDataMessage = document.getElementById('noDataMessage');
         const statisticsContent = document.getElementById('statisticsContent');
 
-        if (noDataMessage) {
-            noDataMessage.style.display = 'none';
-            console.log('✅ Hiding no data message');
-        }
-        if (statisticsContent) {
-            statisticsContent.style.display = 'block';
-            console.log('✅ Showing statistics content');
-        }
+        if (noDataMessage) noDataMessage.style.display = showStatistics ? 'none' : 'block';
+        if (statisticsContent) statisticsContent.style.display = showStatistics ? 'block' : 'none';
+    }
 
+    updateSelectedDateDisplay() {
         const selectedDateElement = document.getElementById('selectedDate');
-        if (selectedDateElement) {
+        if (selectedDateElement && this.selectedDate) {
             selectedDateElement.textContent = `Statistics for ${this.selectedDate.toLocaleDateString('en-US', {
                 weekday: 'long',
                 year: 'numeric',
                 month: 'long',
                 day: 'numeric'
             })}`;
-            console.log('✅ Updated selected date display');
         }
-
-        this.showingAllUrls = false;
-        this.updateTable();
-        this.updateChart();
-
-        console.log('📊 Statistics displayed successfully');
     }
+
+    // ==================== TABLE MANAGEMENT ====================
 
     updateTable() {
         const tbody = document.getElementById('statisticsTableBody');
@@ -952,45 +707,45 @@ class StatisticsManager {
             return;
         }
 
-        console.log('📊 Updating table with current data:', this.currentData);
-
         tbody.innerHTML = '';
 
         const sortedEntries = Object.entries(this.currentData)
             .sort(([,a], [,b]) => b - a);
 
-        console.log('📊 Sorted entries:', sortedEntries);
-
         const entriesToShow = this.showingAllUrls ? sortedEntries : sortedEntries.slice(0, 20);
 
-        console.log(`📊 Showing ${entriesToShow.length} entries out of ${sortedEntries.length} total`);
-
-        entriesToShow.forEach(([url, timeMs], index) => {
-            const row = document.createElement('tr');
-
-            const urlCell = document.createElement('td');
-            urlCell.innerHTML = `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
-            row.appendChild(urlCell);
-
-            const timeCell = document.createElement('td');
-            const formattedTime = this.formatTime(timeMs);
-            timeCell.textContent = formattedTime;
-            row.appendChild(timeCell);
-
+        entriesToShow.forEach(([url, timeMs]) => {
+            const row = this.createTableRow(url, timeMs);
             tbody.appendChild(row);
-            console.log(`📊 Added row ${index + 1}: ${url} - ${formattedTime} (${timeMs}ms)`);
         });
 
-        if (expandBtn) {
-            if (sortedEntries.length > 20) {
-                expandBtn.style.display = 'block';
-                expandBtn.textContent = this.showingAllUrls ? 'Show Top 20' : 'Show All URLs';
-            } else {
-                expandBtn.style.display = 'none';
-            }
-        }
+        this.updateExpandButton(expandBtn, sortedEntries.length);
+        console.log(`✅ Table updated with ${entriesToShow.length} entries`);
+    }
 
-        console.log(`✅ Table updated successfully with ${entriesToShow.length} entries`);
+    createTableRow(url, timeMs) {
+        const row = document.createElement('tr');
+
+        const urlCell = document.createElement('td');
+        urlCell.innerHTML = `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+        row.appendChild(urlCell);
+
+        const timeCell = document.createElement('td');
+        timeCell.textContent = this.formatTime(timeMs);
+        row.appendChild(timeCell);
+
+        return row;
+    }
+
+    updateExpandButton(expandBtn, totalEntries) {
+        if (!expandBtn) return;
+
+        if (totalEntries > 20) {
+            expandBtn.style.display = 'block';
+            expandBtn.textContent = this.showingAllUrls ? 'Show Top 20' : 'Show All URLs';
+        } else {
+            expandBtn.style.display = 'none';
+        }
     }
 
     toggleUrlList() {
@@ -998,6 +753,8 @@ class StatisticsManager {
         this.updateTable();
         this.updateChart();
     }
+
+    // ==================== CHART MANAGEMENT ====================
 
     updateChart() {
         const canvas = document.getElementById('pieChart');
@@ -1008,181 +765,193 @@ class StatisticsManager {
             return;
         }
 
-        // Hide chart if showing all URLs (as per PRD - only show for top 20)
         if (this.showingAllUrls) {
             chartContainer.style.display = 'none';
             return;
-        } else {
-            chartContainer.style.display = 'block';
         }
 
-        // Destroy existing chart
-        if (this.pieChart && this.pieChart.destroy) {
+        chartContainer.style.display = 'block';
+        this.destroyExistingChart();
+
+        const chartData = this.prepareChartData();
+        if (!chartData) {
+            chartContainer.style.display = 'none';
+            return;
+        }
+
+        if (chartData.isEmpty) {
+            this.showChartMessage(chartData.message);
+            return;
+        }
+
+        this.renderChart(canvas, chartData);
+    }
+
+    destroyExistingChart() {
+        if (this.pieChart?.destroy) {
             this.pieChart.destroy();
         }
+    }
 
-        // Prepare data for chart - top 20 URLs only
+    prepareChartData() {
         const sortedEntries = Object.entries(this.currentData)
             .sort(([,a], [,b]) => b - a)
             .slice(0, 20);
 
         if (sortedEntries.length === 0) {
             console.log('📊 No data for chart');
-            chartContainer.style.display = 'none';
-            return;
+            return null;
         }
 
-        // Calculate total time and filter entries with >= 1%
         const totalTime = sortedEntries.reduce((sum, [,timeMs]) => sum + timeMs, 0);
         const filteredEntries = sortedEntries.filter(([,timeMs]) => {
             const percentage = (timeMs / totalTime) * 100;
             return percentage >= 1.0;
         });
 
-        // If no entries meet the 1% threshold, show a message
         if (filteredEntries.length === 0) {
-            this.showChartMessage('No pages viewed for 1% or more of the time.');
-            return;
+            return { isEmpty: true, message: 'No pages viewed for 1% or more of the time.' };
         }
 
-        // Initialize hidden state tracking if not exists
-        if (!this.chartHiddenItems) {
-            this.chartHiddenItems = new Set();
-        }
-
-        // Filter out hidden items
+        this.chartHiddenItems = this.chartHiddenItems || new Set();
         const visibleEntries = filteredEntries.filter(([url]) => !this.chartHiddenItems.has(url));
 
         if (visibleEntries.length === 0) {
-            this.showChartMessage('All chart entries are currently hidden. Click legend items to show them.');
+            return { isEmpty: true, message: 'All chart entries are currently hidden. Click legend items to show them.' };
+        }
+
+        return {
+            visibleEntries,
+            filteredEntries,
+            sortedEntries,
+            totalTime,
+            labels: visibleEntries.map(([url]) => this.shortenUrl(url)),
+            data: visibleEntries.map(([,timeMs]) => timeMs),
+            colors: this.generateDomainConsistentColors(visibleEntries),
+            originalUrls: visibleEntries.map(([url]) => url)
+        };
+    }
+
+    renderChart(canvas, chartData) {
+        this.addPieChartHeading();
+        this.addChartExplanation(chartData.filteredEntries.length, chartData.sortedEntries.length);
+
+        if (typeof Chart === 'undefined') {
+            console.warn('⚠️ Chart.js not available, hiding chart container');
+            const chartContainer = document.getElementById('chartContainer');
+            if (chartContainer) chartContainer.style.display = 'none';
             return;
         }
 
-        const labels = visibleEntries.map(([url]) => this.shortenUrl(url));
-        const data = visibleEntries.map(([,timeMs]) => timeMs);
-        const colors = this.generateDomainConsistentColors(visibleEntries);
-        const originalUrls = visibleEntries.map(([url]) => url);
+        const ctx = canvas.getContext('2d');
+        this.pieChart = new Chart(ctx, this.getChartConfig(chartData));
 
-        // Add pie chart heading and explanation
-        this.addPieChartHeading();
-        this.addChartExplanation(filteredEntries.length, sortedEntries.length);
+        console.log('📊 Chart updated successfully with', chartData.visibleEntries.length, 'visible entries');
+    }
 
-        // Check if Chart.js is available
-        if (typeof Chart !== 'undefined') {
-            const ctx = canvas.getContext('2d');
-            this.pieChart = new Chart(ctx, {
-                type: 'pie',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: data,
-                        backgroundColor: colors,
-                        borderWidth: 2,
-                        borderColor: '#ffffff',
-                        hoverBorderWidth: 3,
-                        hoverBorderColor: '#ffffff'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                usePointStyle: true,
-                                padding: 15,
-                                font: {
-                                    size: 12
-                                },
-                                generateLabels: (chart) => {
-                                    const data = chart.data;
-                                    if (data.labels.length && data.datasets.length) {
-                                        const allLabels = [];
-                                        const visibleTotal = data.datasets[0].data.reduce((a, b) => a + b, 0);
-
-                                        // Add visible entries
-                                        data.labels.forEach((label, i) => {
-                                            const dataset = data.datasets[0];
-                                            const value = dataset.data[i];
-                                            const percentage = ((value / visibleTotal) * 100).toFixed(1);
-                                            const url = originalUrls[i];
-
-                                            allLabels.push({
-                                                text: `${label} (${percentage}%)`,
-                                                fillStyle: dataset.backgroundColor[i],
-                                                strokeStyle: dataset.borderColor,
-                                                lineWidth: dataset.borderWidth,
-                                                hidden: false,
-                                                index: i,
-                                                url: url
-                                            });
-                                        });
-
-                                        // Add hidden entries
-                                        filteredEntries.forEach(([url], i) => {
-                                            if (this.chartHiddenItems.has(url)) {
-                                                const timeMs = filteredEntries.find(([u]) => u === url)[1];
-                                                const percentage = ((timeMs / totalTime) * 100).toFixed(1);
-                                                const shortUrl = this.shortenUrl(url);
-
-                                                allLabels.push({
-                                                    text: `${shortUrl} (${percentage}%) - Hidden`,
-                                                    fillStyle: '#cccccc',
-                                                    strokeStyle: '#999999',
-                                                    lineWidth: 1,
-                                                    hidden: true,
-                                                    index: -1,
-                                                    url: url
-                                                });
-                                            }
-                                        });
-
-                                        return allLabels;
-                                    }
-                                    return [];
-                                }
-                            },
-                            onClick: (e, legendItem) => {
-                                if (legendItem.url) {
-                                    this.toggleChartItem(legendItem.url);
-                                }
-                            }
+    getChartConfig(chartData) {
+        return {
+            type: 'pie',
+            data: {
+                labels: chartData.labels,
+                datasets: [{
+                    data: chartData.data,
+                    backgroundColor: chartData.colors,
+                    borderWidth: 2,
+                    borderColor: '#ffffff',
+                    hoverBorderWidth: 3,
+                    hoverBorderColor: '#ffffff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 15,
+                            font: { size: 12 },
+                            generateLabels: (chart) => this.generateChartLabels(chart, chartData)
                         },
-                        tooltip: {
-                            callbacks: {
-                                label: (context) => {
-                                    const label = context.label || '';
-                                    const value = this.formatTime(context.raw);
-                                    const visibleTotal = context.dataset.data.reduce((a, b) => a + b, 0);
-                                    const percentage = ((context.raw / visibleTotal) * 100).toFixed(1);
-                                    return `${label}: ${value} (${percentage}%)`;
-                                }
+                        onClick: (e, legendItem) => {
+                            if (legendItem.url) {
+                                this.toggleChartItem(legendItem.url);
                             }
                         }
                     },
-                    layout: {
-                        padding: {
-                            top: 20,
-                            bottom: 20
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => this.formatChartTooltip(context)
                         }
                     }
+                },
+                layout: {
+                    padding: { top: 20, bottom: 20 }
                 }
-            });
+            }
+        };
+    }
 
-            console.log('📊 Chart updated successfully with', visibleEntries.length, 'visible entries (', filteredEntries.length, 'total >= 1%)');
-        } else {
-            console.warn('⚠️ Chart.js not available, hiding chart container');
-            chartContainer.style.display = 'none';
-        }
+    generateChartLabels(chart, chartData) {
+        const data = chart.data;
+        if (!data.labels.length || !data.datasets.length) return [];
+
+        const allLabels = [];
+        const visibleTotal = data.datasets[0].data.reduce((a, b) => a + b, 0);
+
+        // Add visible entries
+        data.labels.forEach((label, i) => {
+            const dataset = data.datasets[0];
+            const value = dataset.data[i];
+            const percentage = ((value / visibleTotal) * 100).toFixed(1);
+            const url = chartData.originalUrls[i];
+
+            allLabels.push({
+                text: `${label} (${percentage}%)`,
+                fillStyle: dataset.backgroundColor[i],
+                strokeStyle: dataset.borderColor,
+                lineWidth: dataset.borderWidth,
+                hidden: false,
+                index: i,
+                url: url
+            });
+        });
+
+        // Add hidden entries
+        chartData.filteredEntries.forEach(([url]) => {
+            if (this.chartHiddenItems.has(url)) {
+                const timeMs = chartData.filteredEntries.find(([u]) => u === url)[1];
+                const percentage = ((timeMs / chartData.totalTime) * 100).toFixed(1);
+                const shortUrl = this.shortenUrl(url);
+
+                allLabels.push({
+                    text: `${shortUrl} (${percentage}%) - Hidden`,
+                    fillStyle: '#cccccc',
+                    strokeStyle: '#999999',
+                    lineWidth: 1,
+                    hidden: true,
+                    index: -1,
+                    url: url
+                });
+            }
+        });
+
+        return allLabels;
+    }
+
+    formatChartTooltip(context) {
+        const label = context.label || '';
+        const value = this.formatTime(context.raw);
+        const visibleTotal = context.dataset.data.reduce((a, b) => a + b, 0);
+        const percentage = ((context.raw / visibleTotal) * 100).toFixed(1);
+        return `${label}: ${value} (${percentage}%)`;
     }
 
     addPieChartHeading() {
-        // Remove existing heading if present
         const existingHeading = document.getElementById('pieChartHeading');
-        if (existingHeading) {
-            existingHeading.remove();
-        }
+        if (existingHeading) existingHeading.remove();
 
         const chartContainer = document.getElementById('chartContainer');
         if (!chartContainer) return;
@@ -1197,16 +966,12 @@ class StatisticsManager {
             font-weight: 600;
         `;
 
-        // Insert at the beginning of the chart container
         chartContainer.insertBefore(heading, chartContainer.firstChild);
     }
 
     addChartExplanation(filteredCount, totalCount) {
-        // Remove existing explanation if present
         const existingExplanation = document.getElementById('chartExplanation');
-        if (existingExplanation) {
-            existingExplanation.remove();
-        }
+        if (existingExplanation) existingExplanation.remove();
 
         const chartContainer = document.getElementById('chartContainer');
         if (!chartContainer) return;
@@ -1224,9 +989,7 @@ class StatisticsManager {
             line-height: 1.5;
         `;
 
-        const hiddenCount = this.chartHiddenItems ? this.chartHiddenItems.size : 0;
-        const visibleCount = filteredCount - hiddenCount;
-
+        const hiddenCount = this.chartHiddenItems?.size || 0;
         let explanationText = `Pages with at least 1% of viewing time (${filteredCount} of ${totalCount} pages).`;
 
         if (hiddenCount > 0) {
@@ -1234,10 +997,8 @@ class StatisticsManager {
         }
 
         explanationText += ` Click legend entries below the chart to exclude/include pages from the chart.`;
-
         explanation.textContent = explanationText;
 
-        // Insert before the canvas (after the heading)
         const canvas = document.getElementById('pieChart');
         chartContainer.insertBefore(explanation, canvas);
     }
@@ -1246,10 +1007,8 @@ class StatisticsManager {
         const chartContainer = document.getElementById('chartContainer');
         if (!chartContainer) return;
 
-        // Add pie chart heading first
         this.addPieChartHeading();
 
-        // Then add the message
         const messageDiv = document.createElement('div');
         messageDiv.style.cssText = `
             text-align: center;
@@ -1266,9 +1025,7 @@ class StatisticsManager {
     }
 
     toggleChartItem(url) {
-        if (!this.chartHiddenItems) {
-            this.chartHiddenItems = new Set();
-        }
+        this.chartHiddenItems = this.chartHiddenItems || new Set();
 
         if (this.chartHiddenItems.has(url)) {
             this.chartHiddenItems.delete(url);
@@ -1278,25 +1035,21 @@ class StatisticsManager {
             console.log('📊 Hiding chart item:', this.shortenUrl(url));
         }
 
-        // Refresh the chart
         this.updateChart();
     }
 
     generateDomainConsistentColors(entries) {
         const colors = [];
         const domainColorMap = new Map();
-
-        // Pre-defined color palette for consistent domain coloring
         const colorPalette = [
             '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
-            '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384',
-            '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40',
-            '#FF99CC', '#66B2FF', '#99FF99', '#FFB366', '#B366FF'
+            '#FF9F40', '#C9CBCF', '#99FF99', '#FFB366', '#B366FF',
+            '#FF99CC', '#66B2FF', '#FFFF99', '#FF6666', '#66CCFF'
         ];
 
         let colorIndex = 0;
 
-        entries.forEach(([url], index) => {
+        entries.forEach(([url]) => {
             let domain;
             try {
                 domain = new URL(url).hostname;
@@ -1304,11 +1057,9 @@ class StatisticsManager {
                 domain = url;
             }
 
-            // Check if we've already assigned a color to this domain
             if (domainColorMap.has(domain)) {
                 colors.push(domainColorMap.get(domain));
             } else {
-                // Assign new color to domain
                 const color = colorPalette[colorIndex % colorPalette.length];
                 domainColorMap.set(domain, color);
                 colors.push(color);
@@ -1319,7 +1070,6 @@ class StatisticsManager {
         // Ensure contrasting adjacent segments
         for (let i = 1; i < colors.length; i++) {
             if (colors[i] === colors[i - 1]) {
-                // Find a different color for adjacent segments
                 const availableColors = colorPalette.filter(c => c !== colors[i - 1]);
                 colors[i] = availableColors[i % availableColors.length];
             }
@@ -1328,15 +1078,26 @@ class StatisticsManager {
         return colors;
     }
 
+    // ==================== UTILITY FUNCTIONS ====================
+
+    getLocalDateString(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    createDateFromCalendarDay(year, month, day) {
+        return new Date(year, month, day, 12, 0, 0);
+    }
+
     shortenUrl(url) {
         try {
             const urlObj = new URL(url);
             let displayUrl = urlObj.hostname;
 
-            // Add path if it's meaningful (not just "/")
             if (urlObj.pathname && urlObj.pathname !== '/') {
                 displayUrl += urlObj.pathname;
-                // Truncate very long paths
                 if (displayUrl.length > 40) {
                     displayUrl = displayUrl.substring(0, 37) + '...';
                 }
@@ -1344,7 +1105,6 @@ class StatisticsManager {
 
             return displayUrl;
         } catch {
-            // Fallback for invalid URLs
             return url.length > 40 ? url.substring(0, 37) + '...' : url;
         }
     }
@@ -1367,12 +1127,58 @@ class StatisticsManager {
         return parts.join(', ');
     }
 
+    setButtonState(button, text, disabled) {
+        button.textContent = text;
+        button.disabled = disabled;
+    }
+
+    showError(message) {
+        const monthElement = document.getElementById('currentMonth');
+        if (monthElement) {
+            monthElement.textContent = `Error: ${message}`;
+        }
+    }
+
+    showNotification(message, type = 'info', duration = 4000) {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${type === 'success' ? '#22c55e' : type === 'error' ? '#dc3545' : '#0ea5e9'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-width: 300px;
+        `;
+        notification.textContent = message;
+
+        document.body.appendChild(notification);
+
+        setTimeout(() => notification.style.opacity = '1', 100);
+
+        setTimeout(() => {
+            notification.style.opacity = '0';
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 300);
+        }, duration);
+    }
+
     updateUrl() {
         const url = new URL(window.location);
         if (this.selectedDate) {
             const dateStr = this.getLocalDateString(this.selectedDate);
             url.searchParams.set('date', dateStr);
-            console.log('🔗 Updating URL with date:', dateStr);
         } else {
             url.searchParams.delete('date');
         }
@@ -1401,16 +1207,14 @@ class StatisticsManager {
     }
 }
 
+// ==================== INITIALIZATION ====================
+
 let statsManager;
 
-// Add more robust DOM ready checking
 function initializeWhenReady() {
     if (document.readyState === 'loading') {
         console.log('📊 DOM still loading, waiting...');
-        document.addEventListener('DOMContentLoaded', () => {
-            console.log('📊 DOM loaded via event listener');
-            initializeStatsManager();
-        });
+        document.addEventListener('DOMContentLoaded', initializeStatsManager);
     } else {
         console.log('📊 DOM already loaded');
         initializeStatsManager();
@@ -1419,15 +1223,12 @@ function initializeWhenReady() {
 
 function initializeStatsManager() {
     console.log('🚀 Initializing StatisticsManager...');
-    console.log('🚀 Document ready state:', document.readyState);
 
-    // Check if required elements exist
     const requiredElements = ['currentMonth', 'calendar', 'trackingToggle'];
     const missingElements = requiredElements.filter(id => !document.getElementById(id));
 
     if (missingElements.length > 0) {
         console.error('❌ Missing required elements:', missingElements);
-        console.error('❌ Available elements:', Array.from(document.querySelectorAll('[id]')).map(el => el.id));
         return;
     }
 
@@ -1437,9 +1238,7 @@ function initializeStatsManager() {
         console.log('✅ StatisticsManager initialized and exposed globally');
     } catch (error) {
         console.error('❌ Failed to create StatisticsManager:', error);
-        console.error('❌ Error stack:', error.stack);
     }
 }
 
-// Start initialization
 initializeWhenReady();
