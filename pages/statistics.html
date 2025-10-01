@@ -10,20 +10,41 @@
     <div class="container">
         <header>
             <h1>Chrome Time Tracker</h1>
-            <div class="tracking-controls">
-                <label class="toggle-switch">
-                    <input type="checkbox" id="trackingToggle">
-                    <span class="slider"></span>
-                </label>
-                <span class="toggle-label">Tracking Enabled</span>
+            <div class="header-controls">
+                <div class="tracking-controls">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="trackingToggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="toggle-label">Tracking Enabled</span>
+                </div>
+                <div class="auto-refresh-controls">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="autoRefreshToggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span class="toggle-label">Auto-refresh</span>
+                </div>
+                <button id="refreshStatsBtn" class="refresh-stats-btn">🔄 Refresh stats</button>
             </div>
         </header>
 
         <div id="autoResumeContainer" class="auto-resume-container" style="display: none;">
-            <label>
-                <input type="checkbox" id="autoResumeCheckbox">
-                Auto-resume tracking in 30 minutes
-            </label>
+            <div class="auto-resume-option">
+                <label>
+                    <input type="checkbox" id="autoResumeCheckbox">
+                    Auto-resume tracking in 10 minutes
+                </label>
+            </div>
+
+            <div id="autoResumeTimer" class="auto-resume-timer" style="display: none;">
+                <div class="timer-display">
+                    <span class="timer-icon">⏰</span>
+                    <span class="timer-text">Auto-resume in: </span>
+                    <span id="timerCountdown" class="timer-countdown">10:00</span>
+                </div>
+                <button id="cancelAutoResume" class="cancel-button">Cancel Auto-Resume</button>
+            </div>
         </div>
 
         <div class="calendar-container">
@@ -59,6 +80,15 @@
 
                 <div id="chartContainer" class="chart-container">
                     <canvas id="pieChart"></canvas>
+                </div>
+
+                <div id="cleanupInfoContainer" class="cleanup-info-container">
+                    <div class="cleanup-summary">
+                        <span class="cleanup-icon">🧹</span>
+                        <span class="cleanup-text">Data retention: 3 months</span>
+                        <span id="cleanupStatus" class="cleanup-status">Loading...</span>
+                    </div>
+                    <button id="manualCleanupBtn" class="manual-cleanup-btn">Run Cleanup Now</button>
                 </div>
             </div>
         </div>

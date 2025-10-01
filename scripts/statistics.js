@@ -7,6 +7,10 @@ class StatisticsManager {
         this.pieChart = null;
         this.autoRefreshInterval = null;
         this.isPageVisible = true;
+        this.chartHiddenItems = new Set();
+        this.countdownInterval = null;
+        this.refreshCount = 0;
+        this.autoRefreshEnabled = true;
 
         console.log('📊 StatisticsManager: Initializing...');
         this.init();
@@ -14,11 +18,22 @@ class StatisticsManager {
 
     async init() {
         try {
+            console.log('📊 StatisticsManager: Starting initialization...');
+
+            console.log('📊 StatisticsManager: Testing Chart.js availability...');
+            console.log('📊 Chart.js available:', typeof Chart !== 'undefined');
+            if (typeof Chart !== 'undefined') {
+                console.log('📊 Chart.js version:', Chart.version || 'Unknown');
+            }
+
             console.log('📊 StatisticsManager: Setting up event listeners...');
             this.setupEventListeners();
 
             console.log('📊 StatisticsManager: Loading tracking state...');
             await this.loadTrackingState();
+
+            console.log('📊 StatisticsManager: Loading cleanup status...');
+            await this.loadCleanupStatus();
 
             console.log('📊 StatisticsManager: Updating calendar...');
             await this.updateCalendar();
@@ -35,17 +50,24 @@ class StatisticsManager {
             console.log('✅ StatisticsManager: Initialization complete');
         } catch (error) {
             console.error('❌ StatisticsManager: Initialization error:', error);
+            console.error('❌ Error stack:', error.stack);
+
+            // Show error in UI
+            const monthElement = document.getElementById('currentMonth');
+            if (monthElement) {
+                monthElement.textContent = `Error: ${error.message}`;
+            }
         }
     }
 
     startAutoRefresh() {
-        console.log('🔄 Starting auto-refresh every 10 seconds');
+        console.log('🔄 Setting up auto-refresh (10 second intervals)');
 
         document.addEventListener('visibilitychange', () => {
             this.isPageVisible = !document.hidden;
             console.log(`👁️ Page visibility changed: ${this.isPageVisible ? 'visible' : 'hidden'}`);
 
-            if (this.isPageVisible) {
+            if (this.isPageVisible && this.autoRefreshEnabled) {
                 this.startAutoRefresh();
             } else {
                 this.stopAutoRefresh();
@@ -54,7 +76,7 @@ class StatisticsManager {
 
         this.stopAutoRefresh();
 
-        if (this.isPageVisible) {
+        if (this.isPageVisible && this.autoRefreshEnabled) {
             this.autoRefreshInterval = setInterval(async () => {
                 console.log('🔄 Auto-refreshing data...');
                 await this.refreshCurrentData();
@@ -69,6 +91,47 @@ class StatisticsManager {
             clearInterval(this.autoRefreshInterval);
             this.autoRefreshInterval = null;
             console.log('⏹️ Auto-refresh stopped');
+        }
+    }
+
+    toggleAutoRefresh(enabled) {
+        this.autoRefreshEnabled = enabled;
+        console.log(`🔄 Auto-refresh ${enabled ? 'enabled' : 'disabled'}`);
+
+        if (enabled && this.isPageVisible) {
+            this.startAutoRefresh();
+        } else {
+            this.stopAutoRefresh();
+        }
+    }
+
+    async manualRefreshStats() {
+        console.log('🔄 Manual refresh requested');
+
+        // Show immediate feedback
+        const refreshBtn = document.getElementById('refreshStatsBtn');
+        if (refreshBtn) {
+            const originalText = refreshBtn.textContent;
+            refreshBtn.textContent = '🔄 Refreshing...';
+            refreshBtn.disabled = true;
+
+            try {
+                await this.refreshCurrentData();
+                await this.loadCleanupStatus();
+
+                // Force update calendar to reflect any changes
+                await this.updateCalendar();
+
+                this.showNotification('✅ Statistics refreshed!', 'success');
+            } catch (error) {
+                console.error('❌ Error during manual refresh:', error);
+                this.showNotification('❌ Refresh failed', 'error');
+            } finally {
+                setTimeout(() => {
+                    refreshBtn.textContent = originalText;
+                    refreshBtn.disabled = false;
+                }, 1000);
+            }
         }
     }
 
@@ -101,9 +164,22 @@ class StatisticsManager {
                 }
 
                 await this.updateCalendar();
-                this.showRefreshNotification();
+
+                // Only show auto-refresh notification if it's not a manual refresh
+                if (this.autoRefreshEnabled) {
+                    this.showRefreshNotification();
+                }
             } else {
                 console.log('📊 Data unchanged');
+            }
+
+            // Periodically refresh cleanup status (every 10 refreshes = ~100 seconds)
+            if (!this.refreshCount) this.refreshCount = 0;
+            this.refreshCount++;
+
+            if (this.refreshCount % 10 === 0) {
+                console.log('🧹 Refreshing cleanup status...');
+                await this.loadCleanupStatus();
             }
 
         } catch (error) {
@@ -200,23 +276,72 @@ class StatisticsManager {
         const trackingToggle = document.getElementById('trackingToggle');
         const autoResumeCheckbox = document.getElementById('autoResumeCheckbox');
         const autoResumeContainer = document.getElementById('autoResumeContainer');
+        const cancelAutoResumeBtn = document.getElementById('cancelAutoResume');
+        const manualCleanupBtn = document.getElementById('manualCleanupBtn');
+        const autoRefreshToggle = document.getElementById('autoRefreshToggle');
+        const refreshStatsBtn = document.getElementById('refreshStatsBtn');
 
         if (trackingToggle) {
             trackingToggle.addEventListener('change', async (e) => {
                 const isEnabled = e.target.checked;
-                const autoResume = autoResumeCheckbox?.checked || false;
 
-                console.log(`🔄 Tracking toggle changed: ${isEnabled}, auto-resume: ${autoResume}`);
+                console.log(`🔄 Tracking toggle changed: ${isEnabled}`);
 
                 if (isEnabled) {
+                    // Tracking is being enabled
                     await this.enableTracking();
+                    // Hide auto-resume container and stop any running timer
                     if (autoResumeContainer) autoResumeContainer.style.display = 'none';
+                    this.stopAutoResumeTimer();
                 } else {
-                    await this.disableTracking(autoResume ? 30 : 0);
-                    if (autoResumeContainer) autoResumeContainer.style.display = autoResume ? 'none' : 'block';
+                    // Tracking is being disabled
+                    if (autoResumeContainer && autoResumeCheckbox) {
+                        // Show the auto-resume container and set checkbox to checked by default
+                        autoResumeCheckbox.checked = true;
+                        autoResumeContainer.style.display = 'block';
+
+                        // Disable tracking first
+                        await this.disableTracking(10);
+
+                        // Since auto-resume is checked by default, start the timer immediately
+                        this.startAutoResumeTimer(10);
+                    } else {
+                        // Fallback if elements not found
+                        await this.disableTracking(0);
+                    }
                 }
 
                 this.updateToggleLabel(isEnabled);
+            });
+        } else {
+            console.warn('⚠️ trackingToggle element not found');
+        }
+
+        if (autoRefreshToggle) {
+            autoRefreshToggle.addEventListener('change', (e) => {
+                this.toggleAutoRefresh(e.target.checked);
+            });
+        } else {
+            console.warn('⚠️ autoRefreshToggle element not found');
+        }
+
+        if (refreshStatsBtn) {
+            refreshStatsBtn.addEventListener('click', () => {
+                this.manualRefreshStats();
+            });
+        } else {
+            console.warn('⚠️ refreshStatsBtn element not found');
+        }
+
+        if (cancelAutoResumeBtn) {
+            cancelAutoResumeBtn.addEventListener('click', () => {
+                this.cancelAutoResume();
+            });
+        }
+
+        if (manualCleanupBtn) {
+            manualCleanupBtn.addEventListener('click', () => {
+                this.runManualCleanup();
             });
         }
 
@@ -232,33 +357,111 @@ class StatisticsManager {
         }
 
         window.addEventListener('popstate', () => this.updateFromUrl());
-        window.addEventListener('beforeunload', () => this.stopAutoRefresh());
+        window.addEventListener('beforeunload', () => {
+            this.stopAutoRefresh();
+            this.stopAutoResumeTimer();
+        });
 
-        // Add auto-refresh status indicator
-        this.addStatusIndicator();
+        // Only check for existing auto-resume timer if tracking is disabled
+        this.checkExistingAutoResumeTimer();
     }
 
-    addStatusIndicator() {
-        const header = document.querySelector('header');
-        if (!header) {
-            console.error('❌ Header element not found');
-            return;
+    // Cleanup management methods
+    async loadCleanupStatus() {
+        try {
+            console.log('🧹 Loading cleanup status...');
+            const stats = await chrome.runtime.sendMessage({ action: 'getCleanupStats' });
+
+            if (stats) {
+                this.updateCleanupDisplay(stats);
+                console.log('🧹 Cleanup stats loaded:', stats);
+            } else {
+                console.warn('⚠️ No cleanup stats received');
+            }
+        } catch (error) {
+            console.error('❌ Error loading cleanup status:', error);
         }
+    }
 
-        const statusIndicator = document.createElement('span');
-        statusIndicator.id = 'autoRefreshStatus';
-        statusIndicator.style.cssText = `
-            margin-left: 15px;
-            padding: 4px 8px;
-            background: #22c55e;
-            color: white;
-            border-radius: 4px;
-            font-size: 12px;
-        `;
-        statusIndicator.textContent = '🔄 Auto-refresh: ON';
+    updateCleanupDisplay(stats) {
+        const statusElement = document.getElementById('cleanupStatus');
 
-        header.appendChild(statusIndicator);
-        console.log('🔧 Auto-refresh status indicator added');
+        if (!statusElement || !stats) return;
+
+        const { lastCleanup, totalDataEntries } = stats;
+
+        if (lastCleanup) {
+            const lastCleanupDate = new Date(lastCleanup.timestamp);
+            const now = new Date();
+            const daysDiff = Math.floor((now - lastCleanupDate) / (24 * 60 * 60 * 1000));
+
+            let statusText = '';
+            if (daysDiff === 0) {
+                statusText = 'Last cleaned today';
+            } else if (daysDiff === 1) {
+                statusText = 'Last cleaned yesterday';
+            } else {
+                statusText = `Last cleaned ${daysDiff} days ago`;
+            }
+
+            if (lastCleanup.removedEntries > 0) {
+                statusText += ` (removed ${lastCleanup.removedEntries} entries)`;
+            }
+
+            statusElement.textContent = `${statusText} (${totalDataEntries} entries)`;
+        } else {
+            statusElement.textContent = `No cleanup performed yet (${totalDataEntries} entries)`;
+        }
+    }
+
+    async runManualCleanup() {
+        const manualCleanupBtn = document.getElementById('manualCleanupBtn');
+        const statusElement = document.getElementById('cleanupStatus');
+
+        if (!manualCleanupBtn || !statusElement) return;
+
+        try {
+            console.log('🧹 Running manual cleanup...');
+
+            manualCleanupBtn.disabled = true;
+            manualCleanupBtn.textContent = 'Cleaning...';
+            statusElement.textContent = 'Cleanup in progress...';
+
+            this.showNotification('🧹 Starting data cleanup...', 'info');
+
+            const response = await chrome.runtime.sendMessage({ action: 'manualCleanup' });
+
+            if (response && response.success) {
+                console.log('✅ Manual cleanup completed successfully');
+                this.showNotification('✅ Data cleanup completed!', 'success');
+
+                setTimeout(async () => {
+                    await this.loadCleanupStatus();
+                    await this.updateCalendar();
+
+                    if (this.selectedDate) {
+                        await this.loadDataForDate();
+                    }
+                }, 1000);
+
+            } else {
+                console.error('❌ Manual cleanup failed:', response?.error);
+                this.showNotification('❌ Cleanup failed. Please try again.', 'error');
+            }
+
+        } catch (error) {
+            console.error('❌ Error running manual cleanup:', error);
+            this.showNotification('❌ Cleanup error. Please try again.', 'error');
+        } finally {
+            manualCleanupBtn.disabled = false;
+            manualCleanupBtn.textContent = 'Run Cleanup Now';
+        }
+    }
+
+    formatStorageSize(bytes) {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     }
 
     async loadTrackingState() {
@@ -268,9 +471,34 @@ class StatisticsManager {
             console.log('📡 Tracking state response:', response);
 
             const trackingToggle = document.getElementById('trackingToggle');
+            const autoResumeContainer = document.getElementById('autoResumeContainer');
+
             if (trackingToggle && response) {
-                trackingToggle.checked = response.isTracking !== false;
-                this.updateToggleLabel(response.isTracking !== false);
+                const isTracking = response.isTracking !== false;
+                trackingToggle.checked = isTracking;
+                this.updateToggleLabel(isTracking);
+
+                // Show auto-resume container if tracking is disabled
+                if (!isTracking && autoResumeContainer) {
+                    autoResumeContainer.style.display = 'block';
+
+                    // Check if there's an active auto-resume timer
+                    const result = await chrome.storage.local.get(['autoResumeTimer']);
+                    const timerData = result.autoResumeTimer;
+
+                    if (timerData && timerData.active) {
+                        // There's an active timer, it will be restored by checkExistingAutoResumeTimer
+                        console.log('⏰ Active timer found, will be restored');
+                    } else {
+                        // No active timer, show the reset state
+                        this.showResetAutoResumeState();
+                    }
+                } else {
+                    // Tracking is enabled, hide auto-resume container
+                    if (autoResumeContainer) {
+                        autoResumeContainer.style.display = 'none';
+                    }
+                }
             }
         } catch (error) {
             console.error('❌ Error loading tracking state:', error);
@@ -303,6 +531,272 @@ class StatisticsManager {
         } catch (error) {
             console.error('❌ Error disabling tracking:', error);
         }
+    }
+
+    // Auto-resume timer management
+    async startAutoResumeTimer(minutes) {
+        console.log(`⏰ Starting auto-resume timer for ${minutes} minutes`);
+
+        const endTime = Date.now() + (minutes * 60 * 1000);
+
+        // Save timer state to storage
+        await chrome.storage.local.set({
+            autoResumeTimer: {
+                endTime: endTime,
+                active: true,
+                startTime: Date.now()
+            }
+        });
+
+        // Show timer UI
+        this.showAutoResumeTimer();
+
+        // Start countdown display
+        this.startTimerCountdown(endTime);
+
+        // Notify background script
+        try {
+            await chrome.runtime.sendMessage({
+                action: 'startAutoResumeTimer',
+                endTime: endTime
+            });
+        } catch (error) {
+            console.error('❌ Error starting background timer:', error);
+        }
+    }
+
+    startTimerCountdown(endTime) {
+        const timerElement = document.getElementById('timerCountdown');
+        if (!timerElement) return;
+
+        // Clear existing timer
+        if (this.countdownInterval) {
+            clearInterval(this.countdownInterval);
+        }
+
+        this.countdownInterval = setInterval(() => {
+            const remaining = endTime - Date.now();
+
+            if (remaining <= 0) {
+                // Timer finished
+                this.onAutoResumeComplete();
+                return;
+            }
+
+            // Update display
+            const minutes = Math.floor(remaining / (60 * 1000));
+            const seconds = Math.floor((remaining % (60 * 1000)) / 1000);
+            timerElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+        }, 1000);
+    }
+
+    showAutoResumeTimer() {
+        const timerContainer = document.getElementById('autoResumeTimer');
+        const autoResumeContainer = document.getElementById('autoResumeContainer');
+        const cancelBtn = document.getElementById('cancelAutoResume');
+
+        if (timerContainer && autoResumeContainer) {
+            timerContainer.style.display = 'flex';
+            autoResumeContainer.style.display = 'block';
+
+            // Hide the checkbox option
+            const autoResumeOption = document.querySelector('.auto-resume-option');
+            if (autoResumeOption) {
+                autoResumeOption.style.display = 'none';
+            }
+
+            // Update button text to show cancelling option
+            if (cancelBtn) {
+                cancelBtn.textContent = 'Cancel Auto-Resume';
+            }
+        }
+    }
+
+    showResetAutoResumeState() {
+        const timerContainer = document.getElementById('autoResumeTimer');
+        const autoResumeContainer = document.getElementById('autoResumeContainer');
+        const timerElement = document.getElementById('timerCountdown');
+        const cancelBtn = document.getElementById('cancelAutoResume');
+        const autoResumeCheckbox = document.getElementById('autoResumeCheckbox');
+
+        if (autoResumeContainer) {
+            autoResumeContainer.style.display = 'block';
+
+            // Show timer in reset state
+            if (timerContainer) {
+                timerContainer.style.display = 'flex';
+            }
+
+            // Hide the checkbox option
+            const autoResumeOption = document.querySelector('.auto-resume-option');
+            if (autoResumeOption) {
+                autoResumeOption.style.display = 'none';
+            }
+
+            // Set timer to 10:00 and stop countdown
+            if (timerElement) {
+                timerElement.textContent = '10:00';
+            }
+
+            // Update button to enable auto-resume
+            if (cancelBtn) {
+                cancelBtn.textContent = 'Enable Auto-Resume';
+            }
+
+            // Check the checkbox by default
+            if (autoResumeCheckbox) {
+                autoResumeCheckbox.checked = true;
+            }
+
+            // Stop any running countdown
+            this.stopAutoResumeTimer();
+        }
+    }
+
+    async cancelAutoResume() {
+        console.log('🚫 Cancelling/toggling auto-resume timer');
+
+        const cancelBtn = document.getElementById('cancelAutoResume');
+        const currentText = cancelBtn ? cancelBtn.textContent : '';
+
+        if (currentText === 'Enable Auto-Resume') {
+            // Enable auto-resume (start the timer)
+            console.log('▶️ Enabling auto-resume timer');
+            this.startAutoResumeTimer(10);
+            this.showNotification('⏰ Auto-resume enabled - tracking will resume in 10 minutes', 'info');
+        } else {
+            // Cancel auto-resume (reset to stopped state)
+            console.log('⏹️ Cancelling auto-resume timer');
+
+            // Stop countdown
+            this.stopAutoResumeTimer();
+
+            // Clear storage
+            await chrome.storage.local.remove(['autoResumeTimer']);
+
+            // Notify background script
+            try {
+                await chrome.runtime.sendMessage({ action: 'cancelAutoResumeTimer' });
+            } catch (error) {
+                console.error('❌ Error cancelling background timer:', error);
+            }
+
+            // Show reset state (keep container visible but reset timer)
+            this.showResetAutoResumeState();
+
+            // Show notification
+            this.showNotification('⏹️ Auto-resume cancelled', 'info');
+        }
+    }
+
+    stopAutoResumeTimer() {
+        if (this.countdownInterval) {
+            clearInterval(this.countdownInterval);
+            this.countdownInterval = null;
+        }
+    }
+
+    async onAutoResumeComplete() {
+        console.log('✅ Auto-resume timer completed - enabling tracking');
+
+        // Stop timer
+        this.stopAutoResumeTimer();
+
+        // Clear storage
+        await chrome.storage.local.remove(['autoResumeTimer']);
+
+        // Enable tracking
+        await this.enableTracking();
+
+        // Update UI
+        const trackingToggle = document.getElementById('trackingToggle');
+        if (trackingToggle) {
+            trackingToggle.checked = true;
+        }
+        this.updateToggleLabel(true);
+
+        // Hide auto-resume container
+        const autoResumeContainer = document.getElementById('autoResumeContainer');
+        if (autoResumeContainer) {
+            autoResumeContainer.style.display = 'none';
+        }
+
+        // Show notification
+        this.showNotification('🔄 Tracking automatically resumed!', 'success');
+    }
+
+    async checkExistingAutoResumeTimer() {
+        try {
+            const result = await chrome.storage.local.get(['autoResumeTimer']);
+            const timerData = result.autoResumeTimer;
+
+            if (timerData && timerData.active) {
+                // Only restore timer if tracking is currently disabled
+                const trackingResponse = await chrome.runtime.sendMessage({ action: 'getTrackingState' });
+                const isTracking = trackingResponse && trackingResponse.isTracking !== false;
+
+                if (!isTracking) {
+                    const remaining = timerData.endTime - Date.now();
+
+                    if (remaining > 0) {
+                        console.log('⏰ Found existing auto-resume timer with', Math.floor(remaining / 1000), 'seconds remaining');
+                        this.showAutoResumeTimer();
+                        this.startTimerCountdown(timerData.endTime);
+                    } else {
+                        // Timer should have completed
+                        console.log('⏰ Existing timer has expired, cleaning up');
+                        await chrome.storage.local.remove(['autoResumeTimer']);
+                        this.showResetAutoResumeState();
+                    }
+                } else {
+                    // Tracking is enabled, so remove any stale timer data
+                    console.log('⏰ Tracking is enabled, removing stale auto-resume timer');
+                    await chrome.storage.local.remove(['autoResumeTimer']);
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error checking existing timer:', error);
+        }
+    }
+
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${type === 'success' ? '#22c55e' : type === 'error' ? '#dc3545' : '#0ea5e9'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-width: 300px;
+        `;
+        notification.textContent = message;
+
+        document.body.appendChild(notification);
+
+        // Fade in
+        setTimeout(() => {
+            notification.style.opacity = '1';
+        }, 100);
+
+        // Fade out and remove
+        setTimeout(() => {
+            notification.style.opacity = '0';
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 300);
+        }, 4000);
     }
 
     changeMonth(direction) {
@@ -353,6 +847,8 @@ class StatisticsManager {
 
         if (!monthElement || !calendarElement) {
             console.error('❌ Calendar elements not found');
+            console.error('❌ monthElement:', monthElement);
+            console.error('❌ calendarElement:', calendarElement);
             return;
         }
 
@@ -787,7 +1283,6 @@ class StatisticsManager {
         }
     }
 
-    // Add this new method to show chart explanation text:
     addChartExplanation(filteredCount, totalCount) {
         // Remove existing explanation if present
         const existingExplanation = document.getElementById('chartExplanation');
@@ -829,7 +1324,6 @@ class StatisticsManager {
         chartContainer.insertBefore(explanation, canvas);
     }
 
-    // Add this new method to show chart messages:
     showChartMessage(message) {
         const chartContainer = document.getElementById('chartContainer');
         if (!chartContainer) return;
@@ -849,7 +1343,6 @@ class StatisticsManager {
         `;
     }
 
-    // Add this new method to toggle chart items:
     toggleChartItem(url) {
         if (!this.chartHiddenItems) {
             this.chartHiddenItems = new Set();
@@ -866,30 +1359,6 @@ class StatisticsManager {
         // Refresh the chart
         this.updateChart();
     }
-
-    // Add this new method for URL shortening:
-    shortenUrl(url) {
-        try {
-            const urlObj = new URL(url);
-            let displayUrl = urlObj.hostname;
-
-            // Add path if it's meaningful (not just "/")
-            if (urlObj.pathname && urlObj.pathname !== '/') {
-                displayUrl += urlObj.pathname;
-                // Truncate very long paths
-                if (displayUrl.length > 40) {
-                    displayUrl = displayUrl.substring(0, 37) + '...';
-                }
-            }
-
-            return displayUrl;
-        } catch {
-            // Fallback for invalid URLs
-            return url.length > 40 ? url.substring(0, 37) + '...' : url;
-        }
-    }
-
-    // Add this new method for domain-consistent coloring (as specified in PRD):
 
     generateDomainConsistentColors(entries) {
         const colors = [];
@@ -935,6 +1404,27 @@ class StatisticsManager {
         }
 
         return colors;
+    }
+
+    shortenUrl(url) {
+        try {
+            const urlObj = new URL(url);
+            let displayUrl = urlObj.hostname;
+
+            // Add path if it's meaningful (not just "/")
+            if (urlObj.pathname && urlObj.pathname !== '/') {
+                displayUrl += urlObj.pathname;
+                // Truncate very long paths
+                if (displayUrl.length > 40) {
+                    displayUrl = displayUrl.substring(0, 37) + '...';
+                }
+            }
+
+            return displayUrl;
+        } catch {
+            // Fallback for invalid URLs
+            return url.length > 40 ? url.substring(0, 37) + '...' : url;
+        }
     }
 
     formatTime(ms) {
@@ -991,11 +1481,67 @@ class StatisticsManager {
 
 let statsManager;
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 DOM loaded, initializing StatisticsManager...');
-    statsManager = new StatisticsManager();
+// Add more robust DOM ready checking
+function initializeWhenReady() {
+    if (document.readyState === 'loading') {
+        console.log('📊 DOM still loading, waiting...');
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('📊 DOM loaded via event listener');
+            initializeStatsManager();
+        });
+    } else {
+        console.log('📊 DOM already loaded');
+        initializeStatsManager();
+    }
+}
 
-    window.statsManager = statsManager;
+function initializeStatsManager() {
+    console.log('🚀 Initializing StatisticsManager...');
+    console.log('🚀 Document ready state:', document.readyState);
 
-    console.log('✅ StatisticsManager exposed globally as window.statsManager');
-});
+    // Check if required elements exist
+    const requiredElements = ['currentMonth', 'calendar', 'trackingToggle'];
+    const missingElements = requiredElements.filter(id => !document.getElementById(id));
+
+    if (missingElements.length > 0) {
+        console.error('❌ Missing required elements:', missingElements);
+        console.error('❌ Available elements:', Array.from(document.querySelectorAll('[id]')).map(el => el.id));
+        return;
+    }
+
+    try {
+        statsManager = new StatisticsManager();
+        window.statsManager = statsManager;
+        console.log('✅ StatisticsManager initialized and exposed globally');
+    } catch (error) {
+        console.error('❌ Failed to create StatisticsManager:', error);
+        console.error('❌ Error stack:', error.stack);
+    }
+}
+
+// Start initialization
+initializeWhenReady();
+
+// Add cleanup notification listener
+if (chrome.notifications) {
+    chrome.notifications.onClicked.addListener((notificationId) => {
+        if (notificationId === 'data-cleanup') {
+            console.log('🧹 Cleanup notification clicked - refreshing cleanup status');
+            if (window.statsManager) {
+                window.statsManager.loadCleanupStatus();
+            }
+        }
+    });
+}
+
+// Listen for storage changes that might indicate cleanup
+if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes.lastCleanup) {
+            console.log('🧹 Cleanup status changed, refreshing display');
+            if (window.statsManager) {
+                window.statsManager.loadCleanupStatus();
+            }
+        }
+    });
+}

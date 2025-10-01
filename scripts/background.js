@@ -1,281 +1,387 @@
-// Chrome Time Tracker - Simplified Reliable Tracking
-console.log('🚀 Background script starting...');
+// Add this at the very top of your background.js file:
+console.log('🚀 Background script loaded at:', new Date().toISOString());
 
-class SimpleTimeTracker {
-  constructor() {
-    this.currentUrl = null;
-    this.startTime = null;
-    this.isTracking = true; // Always enabled by default
-    this.saveInterval = null;
-    
-    this.init();
-  }
+// Handle extension icon clicks - add more debugging
+chrome.action.onClicked.addListener((tab) => {
+    console.log('🎯 Extension icon clicked!');
+    console.log('🎯 Current tab:', tab);
 
-  async init() {
-    console.log('📊 SimpleTimeTracker initializing...');
-    
-    // Set up event listeners
-    this.setupEventListeners();
-    
-    // Start tracking current tab immediately
-    await this.startTrackingCurrentTab();
-    
-    // Save data every 5 seconds
-    this.setupAutoSave();
-    
-    console.log('✅ SimpleTimeTracker initialized');
-  }
-
-  setupEventListeners() {
-    // Tab activated (user switches tabs)
-    chrome.tabs.onActivated.addListener(async (activeInfo) => {
-      console.log('🔄 Tab activated:', activeInfo.tabId);
-      await this.handleTabChange(activeInfo.tabId);
-    });
-
-    // URL changed in current tab
-    chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-      if (changeInfo.url && tab.active) {
-        console.log('🌐 URL changed:', changeInfo.url);
-        await this.handleTabChange(tabId);
-      }
-    });
-
-    // Extension icon clicked
-    chrome.action.onClicked.addListener(() => {
-      this.openStatisticsPage();
-    });
-
-    // Save data when tab closes
-    chrome.tabs.onRemoved.addListener(() => {
-      this.saveCurrentSession();
-    });
-  }
-
-  setupAutoSave() {
-    // Save every 5 seconds if there's an active session
-    this.saveInterval = setInterval(() => {
-      this.saveCurrentSession();
-    }, 5000);
-  }
-
-  async handleTabChange(tabId) {
     try {
-      // Save current session before switching
-      this.saveCurrentSession();
-      
-      // Get the new tab
-      const tab = await chrome.tabs.get(tabId);
-      
-      if (tab && tab.url && this.isValidUrl(tab.url)) {
-        this.startTracking(tab.url);
-      } else {
-        this.stopTracking();
-      }
+        // Open the welcome page in a new tab
+        chrome.tabs.create({
+            url: chrome.runtime.getURL('pages/welcome.html')
+        }, (newTab) => {
+            console.log('✅ New tab created:', newTab);
+        });
     } catch (error) {
-      console.error('❌ Error handling tab change:', error);
+        console.error('❌ Error creating tab:', error);
     }
-  }
+});
 
-  async startTrackingCurrentTab() {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
-      if (tab && tab.url && this.isValidUrl(tab.url)) {
-        this.startTracking(tab.url);
-      }
-    } catch (error) {
-      console.error('❌ Error starting tracking for current tab:', error);
-    }
-  }
 
-  startTracking(url) {
-    const normalizedUrl = this.normalizeUrl(url);
-    
-    // Don't restart if already tracking same URL
-    if (this.currentUrl === normalizedUrl) {
-      return;
-    }
-    
-    // Save previous session
-    this.saveCurrentSession();
-    
-    // Start new session
-    this.currentUrl = normalizedUrl;
-    this.startTime = Date.now();
-    
-    console.log('▶️ STARTED TRACKING:', normalizedUrl);
-  }
+// Chrome Time Tracker - Background Script
+let currentUrl = '';
+let startTime = 0;
+let isTracking = true;
+let autoResumeTimeoutId = null;
 
-  stopTracking() {
-    this.saveCurrentSession();
-    this.currentUrl = null;
-    this.startTime = null;
-    console.log('⏹️ STOPPED TRACKING');
-  }
+// Data retention constants
+const DATA_RETENTION_MONTHS = 3;
 
-  saveCurrentSession() {
-    if (!this.currentUrl || !this.startTime) {
-      return;
-    }
-    
-    const timeSpent = Date.now() - this.startTime;
-    const seconds = Math.round(timeSpent / 1000);
-    
-    // Only save if more than 3 seconds
-    if (timeSpent < 3000) {
-      console.log(`⏭️ Session too short: ${seconds}s for ${this.currentUrl}`);
-      return;
-    }
-    
-    console.log(`💾 SAVING: ${seconds}s for ${this.currentUrl}`);
-    
-    // Save to storage immediately
-    this.saveToStorage(this.currentUrl, timeSpent);
-    
-    // Reset start time for next period
-    this.startTime = Date.now();
-  }
+// Initialize on startup and install
+chrome.runtime.onStartup.addListener(() => {
+    console.log('🚀 Background: Extension startup');
+    initializeExtension();
+});
 
-  async saveToStorage(url, timeMs) {
-    try {
-      // Fix: Use consistent date formatting to match statistics.js
-      const today = new Date();
-      const year = today.getFullYear();
-      const month = String(today.getMonth() + 1).padStart(2, '0');
-      const day = String(today.getDate()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day}`;
-      
-      const storageKey = `data_${dateStr}`;
-      
-      console.log(`💾 Saving to key: ${storageKey}`);
-      
-      // Get existing data
-      const result = await chrome.storage.local.get([storageKey]);
-      const dayData = result[storageKey] || {};
-      
-      // Add new time
-      dayData[url] = (dayData[url] || 0) + timeMs;
-      
-      // Save back to storage
-      await chrome.storage.local.set({ [storageKey]: dayData });
-      
-      console.log(`✅ SAVED to storage: ${Math.round(timeMs/1000)}s for ${url} on ${dateStr}`);
-      console.log(`📊 Total for ${url}: ${Math.round(dayData[url]/1000)}s`);
-      
-      // Verify save worked
-      const verification = await chrome.storage.local.get([storageKey]);
-      console.log(`🔍 Verification - ${storageKey}:`, verification[storageKey]);
-      
-    } catch (error) {
-      console.error('❌ Error saving to storage:', error);
-    }
-  }
+chrome.runtime.onInstalled.addListener(() => {
+    console.log('🚀 Background: Extension installed');
+    initializeExtension();
+});
 
-  isValidUrl(url) {
-    if (!url) return false;
-    if (url.startsWith('chrome://')) return false;
-    if (url.startsWith('chrome-extension://')) return false;
-    if (url.startsWith('edge://')) return false;
-    if (url.startsWith('about:')) return false;
-    if (url.startsWith('file://')) return false;
-    
-    try {
-      new URL(url);
-      return true;
-    } catch {
-      return false;
-    }
-  }
+async function initializeExtension() {
+    // Initialize tracking state
+    const result = await chrome.storage.local.get(['isTracking']);
+    isTracking = result.isTracking !== false;
 
-  normalizeUrl(url) {
-    try {
-      const urlObj = new URL(url);
-      let hostname = urlObj.hostname;
-      let pathname = urlObj.pathname;
-      
-      // Remove www
-      if (hostname.startsWith('www.')) {
-        hostname = hostname.substring(4);
-      }
-      
-      // Remove trailing slash
-      if (pathname !== '/' && pathname.endsWith('/')) {
-        pathname = pathname.slice(0, -1);
-      }
-      
-      return `${urlObj.protocol}//${hostname}${pathname}`;
-    } catch (error) {
-      return url;
-    }
-  }
+    // Check for existing auto-resume timer
+    checkForExistingTimer();
 
-  async openStatisticsPage() {
-    const url = chrome.runtime.getURL('pages/statistics.html');
-    await chrome.tabs.create({ url });
-  }
-
-  // Status method for debugging
-  getStatus() {
-    const currentSession = this.startTime ? Date.now() - this.startTime : 0;
-    return {
-      isTracking: this.isTracking,
-      currentUrl: this.currentUrl,
-      currentSessionMs: currentSession,
-      currentSessionSec: Math.round(currentSession / 1000)
-    };
-  }
+    console.log('✅ Background: Extension initialized');
 }
 
-// Initialize tracker
-const tracker = new SimpleTimeTracker();
+// Tab and URL tracking
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    if (!isTracking) return;
 
-// Message handler
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('📨 Message received:', request);
-  
-  switch (request.action) {
-    case 'getTrackingState':
-    case 'getCurrentStatus':
-      sendResponse(tracker.getStatus());
-      break;
-      
-    case 'enableTracking':
-      tracker.isTracking = true;
-      sendResponse({ success: true });
-      break;
-      
-    case 'disableTracking':
-      tracker.isTracking = false;
-      tracker.stopTracking();
-      sendResponse({ success: true });
-      break;
-      
-    case 'forceTrackingCheck':
-      tracker.startTrackingCurrentTab();
-      sendResponse({ success: true });
-      break;
-      
-    default:
-      sendResponse({ error: 'Unknown action' });
-  }
+    try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        handleUrlChange(tab.url);
+    } catch (error) {
+        console.error('❌ Background: Error getting active tab:', error);
+    }
 });
 
-// First install
-chrome.runtime.onInstalled.addListener(async (details) => {
-  if (details.reason === 'install') {
-    console.log('🎉 Extension installed');
-    
-    // Set install date
-    await chrome.storage.local.set({ 
-      installDate: new Date().toISOString(),
-      repoInfo: 'hubwriter/chrome-time-tracker'
-    });
-    
-    // Show welcome page
-    const welcomeUrl = chrome.runtime.getURL('pages/welcome.html');
-    await chrome.tabs.create({ url: welcomeUrl });
-  }
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (!isTracking) return;
+
+    if (changeInfo.status === 'complete' && tab.active && tab.url) {
+        handleUrlChange(tab.url);
+    }
 });
 
-console.log('📋 Background script loaded');
+function handleUrlChange(url) {
+    if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+        return;
+    }
+
+    const now = Date.now();
+
+    // Save time for previous URL
+    if (currentUrl && startTime > 0) {
+        const timeSpent = now - startTime;
+        saveTimeData(currentUrl, timeSpent);
+    }
+
+    // Start tracking new URL
+    currentUrl = url;
+    startTime = now;
+
+    console.log('📊 Background: Tracking URL:', url);
+}
+
+async function saveTimeData(url, timeMs) {
+    try {
+        const today = getLocalDateString(new Date());
+        const key = `data_${today}`;
+
+        const result = await chrome.storage.local.get([key]);
+        const data = result[key] || {};
+
+        data[url] = (data[url] || 0) + timeMs;
+
+        await chrome.storage.local.set({ [key]: data });
+
+        console.log(`💾 Background: Saved ${timeMs}ms for ${url}`);
+    } catch (error) {
+        console.error('❌ Background: Error saving time data:', error);
+    }
+}
+
+function getLocalDateString(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+// Message handling
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    console.log('📡 Background: Received message:', message);
+
+    if (message.action === 'getTrackingState') {
+        getTrackingState().then(state => sendResponse(state));
+        return true;
+    } else if (message.action === 'enableTracking') {
+        enableTracking().then(result => sendResponse(result));
+        return true;
+    } else if (message.action === 'disableTracking') {
+        disableTracking(message.autoResumeMinutes).then(result => sendResponse(result));
+        return true;
+    } else if (message.action === 'startAutoResumeTimer') {
+        startBackgroundAutoResumeTimer(message.endTime);
+        sendResponse({ success: true });
+        return false;
+    } else if (message.action === 'cancelAutoResumeTimer') {
+        cancelBackgroundAutoResumeTimer();
+        sendResponse({ success: true });
+        return false;
+    } else if (message.action === 'getCleanupStats') {
+        getCleanupStats().then(stats => sendResponse(stats));
+        return true;
+    } else if (message.action === 'manualCleanup') {
+        performDataCleanup().then((result) => {
+            sendResponse({ success: true, removedEntries: result.removedEntries });
+        }).catch(error => {
+            console.error('❌ Background: Manual cleanup error:', error);
+            sendResponse({ success: false, error: error.message });
+        });
+        return true;
+    }
+
+    return false;
+});
+
+// Tracking state management
+async function getTrackingState() {
+    try {
+        const result = await chrome.storage.local.get(['isTracking']);
+        const trackingState = result.isTracking !== false;
+        return { isTracking: trackingState };
+    } catch (error) {
+        console.error('❌ Background: Error getting tracking state:', error);
+        return { isTracking: false };
+    }
+}
+
+async function enableTracking() {
+    try {
+        isTracking = true;
+        await chrome.storage.local.set({ isTracking: true });
+
+        // Start tracking current tab
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs.length > 0 && tabs[0].url) {
+            handleUrlChange(tabs[0].url);
+        }
+
+        console.log('✅ Background: Tracking enabled');
+        return { success: true };
+    } catch (error) {
+        console.error('❌ Background: Error enabling tracking:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+async function disableTracking(autoResumeMinutes = 0) {
+    try {
+        // Save current session before disabling
+        if (currentUrl && startTime > 0) {
+            const timeSpent = Date.now() - startTime;
+            await saveTimeData(currentUrl, timeSpent);
+        }
+
+        isTracking = false;
+        currentUrl = '';
+        startTime = 0;
+
+        await chrome.storage.local.set({ isTracking: false });
+
+        console.log(`⏸️ Background: Tracking disabled${autoResumeMinutes ? ` with ${autoResumeMinutes} minute auto-resume` : ''}`);
+        return { success: true };
+    } catch (error) {
+        console.error('❌ Background: Error disabling tracking:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Auto-resume timer functions
+function startBackgroundAutoResumeTimer(endTime) {
+    console.log('⏰ Background: Starting auto-resume timer');
+
+    if (autoResumeTimeoutId) {
+        clearTimeout(autoResumeTimeoutId);
+    }
+
+    const delay = endTime - Date.now();
+
+    if (delay <= 0) {
+        executeAutoResume();
+        return;
+    }
+
+    autoResumeTimeoutId = setTimeout(() => {
+        executeAutoResume();
+    }, delay);
+
+    console.log(`⏰ Background: Timer set for ${Math.floor(delay / 1000)} seconds`);
+}
+
+function cancelBackgroundAutoResumeTimer() {
+    console.log('🚫 Background: Cancelling auto-resume timer');
+
+    if (autoResumeTimeoutId) {
+        clearTimeout(autoResumeTimeoutId);
+        autoResumeTimeoutId = null;
+    }
+}
+
+async function executeAutoResume() {
+    console.log('✅ Background: Executing auto-resume');
+
+    try {
+        await enableTracking();
+        await chrome.storage.local.remove(['autoResumeTimer']);
+        autoResumeTimeoutId = null;
+
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: '../icons/icon48.png',
+            title: 'Chrome Time Tracker',
+            message: 'Tracking has been automatically resumed!'
+        });
+
+        console.log('✅ Background: Auto-resume completed successfully');
+
+    } catch (error) {
+        console.error('❌ Background: Error during auto-resume:', error);
+    }
+}
+
+async function checkForExistingTimer() {
+    try {
+        const result = await chrome.storage.local.get(['autoResumeTimer']);
+        const timerData = result.autoResumeTimer;
+
+        if (timerData && timerData.active) {
+            const remaining = timerData.endTime - Date.now();
+
+            if (remaining > 0) {
+                console.log('⏰ Background: Restored existing timer with', Math.floor(remaining / 1000), 'seconds remaining');
+                startBackgroundAutoResumeTimer(timerData.endTime);
+            } else {
+                console.log('⏰ Background: Existing timer expired, executing auto-resume');
+                executeAutoResume();
+            }
+        }
+    } catch (error) {
+        console.error('❌ Background: Error checking for existing timer:', error);
+    }
+}
+
+// Data cleanup functions
+async function performDataCleanup() {
+    try {
+        console.log('🧹 Background: Starting data cleanup...');
+
+        // Get all storage data
+        const allData = await chrome.storage.local.get(null);
+
+        // Calculate cutoff date (3 months ago)
+        const cutoffDate = new Date();
+        cutoffDate.setMonth(cutoffDate.getMonth() - DATA_RETENTION_MONTHS);
+        const cutoffDateStr = getLocalDateString(cutoffDate);
+
+        console.log(`🧹 Background: Cleaning data older than ${cutoffDateStr}`);
+
+        // Find data keys to remove
+        const dataKeysToRemove = [];
+        let totalKeysChecked = 0;
+        let dataKeysFound = 0;
+
+        Object.keys(allData).forEach(key => {
+            totalKeysChecked++;
+
+            if (key.startsWith('data_')) {
+                dataKeysFound++;
+                const dateStr = key.replace('data_', '');
+
+                // Validate date format (YYYY-MM-DD)
+                if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                    if (dateStr < cutoffDateStr) {
+                        dataKeysToRemove.push(key);
+                        console.log(`🗑️ Background: Marking for removal: ${key} (${dateStr})`);
+                    }
+                }
+            }
+        });
+
+        // Remove old data
+        if (dataKeysToRemove.length > 0) {
+            await chrome.storage.local.remove(dataKeysToRemove);
+
+            console.log(`✅ Background: Cleanup completed - removed ${dataKeysToRemove.length} old data entries`);
+
+            // Store cleanup stats
+            await chrome.storage.local.set({
+                lastCleanup: {
+                    timestamp: Date.now(),
+                    removedEntries: dataKeysToRemove.length,
+                    cutoffDate: cutoffDateStr
+                }
+            });
+
+            // Show notification about cleanup
+            if (dataKeysToRemove.length > 0) {
+                chrome.notifications.create('data-cleanup', {
+                    type: 'basic',
+                    iconUrl: '../icons/icon48.png',
+                    title: 'Chrome Time Tracker - Data Cleanup',
+                    message: `Cleaned up ${dataKeysToRemove.length} old data entries (older than ${DATA_RETENTION_MONTHS} months)`
+                });
+            }
+
+        } else {
+            console.log('✅ Background: No old data found to clean up');
+
+            // Still update last cleanup timestamp
+            await chrome.storage.local.set({
+                lastCleanup: {
+                    timestamp: Date.now(),
+                    removedEntries: 0,
+                    cutoffDate: cutoffDateStr
+                }
+            });
+        }
+
+        return { success: true, removedEntries: dataKeysToRemove.length };
+
+    } catch (error) {
+        console.error('❌ Background: Error during data cleanup:', error);
+        throw error;
+    }
+}
+
+async function getCleanupStats() {
+    try {
+        const result = await chrome.storage.local.get(['lastCleanup']);
+        const allData = await chrome.storage.local.get(null);
+
+        // Count current data entries
+        const dataKeys = Object.keys(allData).filter(key => key.startsWith('data_'));
+        const totalDataEntries = dataKeys.length;
+
+        // Calculate storage size (rough estimate)
+        const storageSize = JSON.stringify(allData).length;
+
+        return {
+            lastCleanup: result.lastCleanup || null,
+            totalDataEntries: totalDataEntries,
+            estimatedStorageSize: storageSize,
+            retentionMonths: DATA_RETENTION_MONTHS
+        };
+    } catch (error) {
+        console.error('❌ Background: Error getting cleanup stats:', error);
+        return null;
+    }
+}
