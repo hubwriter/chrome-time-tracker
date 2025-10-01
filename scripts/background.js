@@ -34,7 +34,10 @@
  * - `isTracking`: Boolean tracking state
  * - `autoResumeTimer`: Timer state for auto-resume functionality
  * - `lastAutomaticCleanup`: Metadata about cleanup operations
+ * - `showWelcomeOnStartup`: User preference for showing welcome page
  *
+ * @author Chrome Time Tracker Team
+ * @version 1.0
  */
 
 // ==================== CONSTANTS ====================
@@ -93,11 +96,28 @@ chrome.runtime.onInstalled.addListener(() => {
     initializeExtension();
 });
 
-chrome.action.onClicked.addListener(() => {
+chrome.action.onClicked.addListener(async () => {
     console.log('🎯 Extension icon clicked');
-    chrome.tabs.create({
-        url: chrome.runtime.getURL('pages/welcome.html')
-    });
+
+    try {
+        // Check user preference for showing welcome page
+        const result = await chrome.storage.local.get(['showWelcomeOnStartup']);
+        const showWelcome = result.showWelcomeOnStartup !== false; // Default to true
+
+        const targetPage = showWelcome ? 'pages/welcome.html' : 'pages/statistics.html';
+
+        chrome.tabs.create({
+            url: chrome.runtime.getURL(targetPage)
+        });
+
+        console.log(`📖 Opening ${showWelcome ? 'welcome' : 'statistics'} page`);
+    } catch (error) {
+        console.error('❌ Error checking welcome preference, defaulting to welcome page:', error);
+        // Fallback to welcome page if there's an error
+        chrome.tabs.create({
+            url: chrome.runtime.getURL('pages/welcome.html')
+        });
+    }
 });
 
 async function initializeExtension() {

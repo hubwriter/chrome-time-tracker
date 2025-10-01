@@ -1,11 +1,10 @@
 {
     "manifest_version": 3,
     "name": "Chrome Time Tracker",
-    "version": "1.0.0",
+    "version": "1.0",
     "description": "Track time spent on websites",
     "permissions": [
         "storage",
-        "activeTab",
         "tabs",
         "notifications"
     ],
@@ -15,6 +14,7 @@
     "action": {
         "default_title": "Chrome Time Tracker"
     },
+    "options_page": "pages/options.html",
     "icons": {
         "16": "assets/icon16.png",
         "32": "assets/icon32.png",

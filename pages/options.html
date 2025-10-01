@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chrome Time Tracker - Options</title>
+    <link rel="stylesheet" href="../styles/options.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="../assets/icon48.png" alt="Chrome Time Tracker" class="icon">
+            <h1>Chrome Time Tracker Options</h1>
+        </div>
+
+        <div class="options-section">
+            <h2>Startup Behavior</h2>
+            <div class="option-item">
+                <label class="checkbox-container">
+                    <input type="checkbox" id="showWelcomeOnStartup">
+                    <span class="checkmark"></span>
+                    <span class="option-label">Show welcome page when extension icon is clicked</span>
+                </label>
+                <p class="option-description">
+                    When enabled, clicking the extension icon will show the welcome page first.
+                    When disabled, it will go directly to the statistics page.
+                </p>
+            </div>
+        </div>
+
+        <div class="save-section">
+            <div id="status" class="status-message"></div>
+            <button id="save" class="save-button">Save Options</button>
+        </div>
+
+        <div class="info-section">
+            <h2>About</h2>
+            <p><strong>Version:</strong> 1.0</p>
+            <p><strong>Repository:</strong> <a href="https://github.com/hubwriter/chrome-time-tracker" target="_blank">hubwriter/chrome-time-tracker</a></p>
+        </div>
+    </div>
+
+    <script src="../scripts/options.js"></script>
+</body>
+</html>
